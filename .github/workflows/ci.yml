@@ -1,0 +1,51 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Formatting
+        if: runner.os == 'Linux'
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then echo "Run gofmt on:"; echo "$unformatted"; exit 1; fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 ./...
+
+      - name: Test (race detector)
+        if: runner.os == 'Linux'
+        run: go test -race ./...
+
+      - name: Test
+        if: runner.os == 'Windows'
+        run: go test ./...
+
+      - name: Cross-build every release target
+        if: runner.os == 'Linux'
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          GOOS=linux GOARCH=amd64 go build -o /dev/null ./cmd/pulse
+          GOOS=linux GOARCH=arm64 go build -o /dev/null ./cmd/pulse
+          GOOS=windows GOARCH=amd64 go build -o /dev/null ./cmd/pulse

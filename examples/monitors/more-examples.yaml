@@ -1,0 +1,58 @@
+# monitors/more-examples.yaml: ready-made monitors to copy from.
+#
+# Nothing here is active. Uncomment a block, change it to match your server,
+# delete the [] after `monitors:`, then run `pulse validate`.
+
+monitors: []
+
+#  - id: nginx                        # a system service stops or keeps failing
+#    type: service
+#    service: nginx
+#    severity: critical
+#
+#  - id: app-container                # a Docker container dies or restart-loops
+#    type: container
+#    container: my-app
+#
+#  - id: worker-process               # a process is not running
+#    type: process
+#    match: queue-worker
+#
+#  - id: database-port                # nothing answers on a port
+#    type: port
+#    port: 5432
+#
+#  - id: homepage                     # a website is down or slow
+#    type: http
+#    url: https://example.com/
+#    expect_status: 200
+#    for: 1m
+#
+#  - id: certificate                  # an SSL certificate is about to expire
+#    type: ssl
+#    host: example.com:443
+#    alert_when: days_left < 14
+#    interval: 6h
+#
+#  - id: app-errors                   # errors pile up in a log
+#    type: log
+#    source: { file: /var/log/myapp/error.log }
+#    pattern: "ERROR|FATAL"
+#    alert_when: matches_per_minute > 20
+#
+#  - id: backup-file                  # a file stops being updated
+#    type: file
+#    path: /backups/latest.tar.gz
+#    alert_when: age > 26h
+#
+#  - id: queue-depth                  # anything a command can measure
+#    type: command
+#    run: ["/usr/local/bin/queue-depth"]   # a list, never one shell string
+#    parse: number
+#    alert_when: value > 1000
+#    for: 5m
+#
+#  - id: nightly-job                  # a job that should check in regularly
+#    type: heartbeat
+#    expect_every: 1d
+#    grace: 2h

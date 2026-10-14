@@ -1,0 +1,31 @@
+# monitors/system.yaml: the basics every server needs.
+#
+# Every file in monitors/ ending in .yaml is read. Split them however you like.
+#
+# Each monitor has:
+#   id          a unique name (lowercase, digits, - and _)
+#   type        what to watch
+#   alert_when  one comparison that means "something is wrong"
+#   for         how long it must stay wrong before you are alerted,
+#               so a short spike does not wake anyone up
+#   clear_when  (optional) when it counts as fixed again
+#   notify      (optional) channels for this monitor; otherwise the defaults
+
+monitors:
+  - id: root-disk
+    type: disk
+    path: /
+    alert_when: used_percent > 85
+    clear_when: used_percent < 80   # avoids flapping around 85%
+    for: 2m
+    severity: critical
+
+  - id: memory
+    type: memory
+    alert_when: used_percent > 90
+    for: 5m
+
+  - id: cpu
+    type: cpu
+    alert_when: used_percent > 95
+    for: 10m

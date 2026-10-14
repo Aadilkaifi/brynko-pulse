@@ -1,0 +1,366 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:brynko-pulse:config:1",
+  "title": "brynko-pulse configuration",
+  "description": "The merged configuration: pulse.yaml, channels.yaml and every file in monitors/.",
+  "type": "object",
+  "properties": {
+    "version": { "$ref": "#/$defs/configVersion" },
+    "server_name": { "$ref": "#/$defs/serverName" },
+    "defaults": { "$ref": "#/$defs/defaults" },
+    "limits": { "$ref": "#/$defs/limits" },
+    "api": { "$ref": "#/$defs/api" },
+    "channels": { "$ref": "#/$defs/channelMap" },
+    "monitors": { "$ref": "#/$defs/monitorList" }
+  },
+  "required": ["version", "server_name"],
+  "additionalProperties": false,
+
+  "$defs": {
+    "pulseFile": {
+      "description": "pulse.yaml",
+      "type": "object",
+      "properties": {
+        "version": { "$ref": "#/$defs/configVersion" },
+        "server_name": { "$ref": "#/$defs/serverName" },
+        "defaults": { "$ref": "#/$defs/defaults" },
+        "limits": { "$ref": "#/$defs/limits" },
+        "api": { "$ref": "#/$defs/api" }
+      },
+      "required": ["version", "server_name"],
+      "additionalProperties": false
+    },
+    "channelsFile": {
+      "description": "channels.yaml",
+      "type": "object",
+      "properties": { "channels": { "$ref": "#/$defs/channelMap" } },
+      "required": ["channels"],
+      "additionalProperties": false
+    },
+    "monitorsFile": {
+      "description": "A file in monitors/",
+      "type": "object",
+      "properties": { "monitors": { "$ref": "#/$defs/monitorList" } },
+      "required": ["monitors"],
+      "additionalProperties": false
+    },
+
+    "configVersion": { "description": "Config format version.", "const": 1 },
+    "serverName": {
+      "description": "Name shown in every alert.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$"
+    },
+    "id": {
+      "description": "Stable identifier: lowercase letters, digits, - and _.",
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$"
+    },
+    "duration": {
+      "description": "A duration such as 30s, 5m, 2h or 1d.",
+      "type": "string",
+      "pattern": "^([0-9]+(ms|s|m|h|d))+$"
+    },
+    "severity": { "type": "string", "enum": ["info", "warning", "critical"] },
+    "envRef": {
+      "description": "A secret must come from an environment variable, written as ${NAME}.",
+      "type": "string",
+      "pattern": "^\\$\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+    },
+    "condition": {
+      "description": "One comparison, for example: used_percent > 85.",
+      "type": "string",
+      "pattern": "^\\s*[a-z_][a-z0-9_]*\\s*(>=|<=|==|!=|>|<)\\s*(-?[0-9]+(\\.[0-9]+)?|([0-9]+(ms|s|m|h|d))+|\"[^\"]*\"|[a-z_][a-z0-9_]*)\\s*$"
+    },
+    "notifyList": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/id" },
+      "uniqueItems": true
+    },
+    "emailList": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$" },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "phoneList": {
+      "description": "Phone numbers in international format, for example +919876543210.",
+      "type": "array",
+      "items": { "type": "string", "pattern": "^\\+[1-9][0-9]{6,14}$" },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+
+    "defaults": {
+      "type": "object",
+      "properties": {
+        "severity": { "$ref": "#/$defs/severity", "default": "warning" },
+        "notify": { "$ref": "#/$defs/notifyList" },
+        "for": { "$ref": "#/$defs/duration" },
+        "cooldown": { "$ref": "#/$defs/duration", "default": "15m" },
+        "interval": { "$ref": "#/$defs/duration", "default": "30s" }
+      },
+      "additionalProperties": false
+    },
+    "limits": {
+      "type": "object",
+      "properties": {
+        "max_alerts_per_minute": {
+          "description": "Above this, alerts are folded into one summary message.",
+          "type": "integer", "minimum": 1, "maximum": 1000, "default": 10
+        },
+        "command_output_bytes": {
+          "description": "Output kept from a command check.",
+          "type": "integer", "minimum": 1024, "maximum": 1048576, "default": 65536
+        }
+      },
+      "additionalProperties": false
+    },
+    "api": {
+      "description": "Local API for tools and a future UI. Never listens on a network port.",
+      "type": "object",
+      "properties": { "enabled": { "type": "boolean", "default": false } },
+      "additionalProperties": false
+    },
+
+    "channelMap": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/id" },
+      "additionalProperties": { "$ref": "#/$defs/channel" }
+    },
+    "channel": {
+      "type": "object",
+      "properties": {
+        "type": { "enum": ["smtp", "whatsapp", "telegram", "slack", "webhook", "brynko"] },
+        "min_severity": { "$ref": "#/$defs/severity", "default": "info" }
+      },
+      "required": ["type"],
+      "allOf": [
+        {
+          "if": { "required": ["type"], "properties": { "type": { "const": "smtp" } } },
+          "then": {
+            "properties": {
+              "host": { "type": "string", "minLength": 1 },
+              "port": { "type": "integer", "minimum": 1, "maximum": 65535, "default": 587 },
+              "tls": { "enum": ["starttls", "tls", "none"], "default": "starttls" },
+              "username": { "type": "string" },
+              "password": { "$ref": "#/$defs/envRef" },
+              "from": { "type": "string", "minLength": 3 },
+              "to": { "$ref": "#/$defs/emailList" }
+            },
+            "required": ["host", "from", "to"]
+          }
+        },
+        {
+          "if": { "required": ["type"], "properties": { "type": { "const": "whatsapp" } } },
+          "then": {
+            "properties": {
+              "phone_number_id": { "type": "string", "minLength": 1 },
+              "access_token": { "$ref": "#/$defs/envRef" },
+              "template": { "type": "string", "minLength": 1 },
+              "to": { "$ref": "#/$defs/phoneList" }
+            },
+            "required": ["phone_number_id", "access_token", "template", "to"]
+          }
+        },
+        {
+          "if": { "required": ["type"], "properties": { "type": { "const": "telegram" } } },
+          "then": {
+            "properties": {
+              "bot_token": { "$ref": "#/$defs/envRef" },
+              "chat_id": { "type": "string", "minLength": 1 }
+            },
+            "required": ["bot_token", "chat_id"]
+          }
+        },
+        {
+          "if": { "required": ["type"], "properties": { "type": { "const": "slack" } } },
+          "then": {
+            "properties": { "webhook_url": { "$ref": "#/$defs/envRef" } },
+            "required": ["webhook_url"]
+          }
+        },
+        {
+          "if": { "required": ["type"], "properties": { "type": { "const": "webhook" } } },
+          "then": {
+            "properties": {
+              "url": { "description": "Must start with http:// or https://.", "type": "string", "pattern": "^https?://" },
+              "secret": { "$ref": "#/$defs/envRef" },
+              "timeout": { "$ref": "#/$defs/duration", "default": "10s" }
+            },
+            "required": ["url"]
+          }
+        },
+        {
+          "if": { "required": ["type"], "properties": { "type": { "const": "brynko" } } },
+          "then": {
+            "properties": {
+              "api_key": { "$ref": "#/$defs/envRef" },
+              "whatsapp": { "$ref": "#/$defs/phoneList" },
+              "sms": { "$ref": "#/$defs/phoneList" },
+              "email": { "$ref": "#/$defs/emailList" }
+            },
+            "required": ["api_key"],
+            "anyOf": [
+              { "required": ["whatsapp"] },
+              { "required": ["sms"] },
+              { "required": ["email"] }
+            ]
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+
+    "monitorList": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/monitor" }
+    },
+    "monitor": {
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "type": {
+          "enum": ["cpu", "memory", "load", "swap", "disk", "service", "container", "process",
+                   "port", "http", "ssl", "log", "file", "command", "heartbeat"]
+        },
+        "name": { "type": "string", "maxLength": 120 },
+        "enabled": { "type": "boolean", "default": true },
+        "interval": { "$ref": "#/$defs/duration" },
+        "alert_when": { "$ref": "#/$defs/condition" },
+        "clear_when": { "$ref": "#/$defs/condition" },
+        "for": { "$ref": "#/$defs/duration" },
+        "severity": { "$ref": "#/$defs/severity" },
+        "notify": { "$ref": "#/$defs/notifyList" },
+        "cooldown": { "$ref": "#/$defs/duration" }
+      },
+      "required": ["id", "type"],
+      "allOf": [
+        {
+          "if": { "required": ["type"], "properties": { "type": { "enum": ["cpu", "memory", "load", "swap"] } } },
+          "then": { "required": ["alert_when"] }
+        },
+        {
+          "if": { "required": ["type"], "properties": { "type": { "const": "disk" } } },
+          "then": {
+            "properties": { "path": { "type": "string", "minLength": 1 } },
+            "required": ["path", "alert_when"]
+          }
+        },
+        {
+          "if": { "required": ["type"], "properties": { "type": { "const": "service" } } },
+          "then": {
+            "properties": { "service": { "type": "string", "minLength": 1 } },
+            "required": ["service"]
+          }
+        },
+        {
+          "if": { "required": ["type"], "properties": { "type": { "const": "container" } } },
+          "then": {
+            "properties": { "container": { "type": "string", "minLength": 1 } },
+            "required": ["container"]
+          }
+        },
+        {
+          "if": { "required": ["type"], "properties": { "type": { "const": "process" } } },
+          "then": {
+            "properties": { "match": { "type": "string", "minLength": 1 } },
+            "required": ["match"]
+          }
+        },
+        {
+          "if": { "required": ["type"], "properties": { "type": { "const": "port" } } },
+          "then": {
+            "properties": {
+              "host": { "type": "string", "minLength": 1, "default": "127.0.0.1" },
+              "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+              "timeout": { "$ref": "#/$defs/duration", "default": "5s" }
+            },
+            "required": ["port"]
+          }
+        },
+        {
+          "if": { "required": ["type"], "properties": { "type": { "const": "http" } } },
+          "then": {
+            "properties": {
+              "url": { "description": "Must start with http:// or https://.", "type": "string", "pattern": "^https?://" },
+              "method": { "enum": ["GET", "HEAD", "POST"], "default": "GET" },
+              "expect_status": {
+                "oneOf": [
+                  { "type": "integer", "minimum": 100, "maximum": 599 },
+                  { "type": "array", "items": { "type": "integer", "minimum": 100, "maximum": 599 }, "minItems": 1 }
+                ]
+              },
+              "body_contains": { "type": "string", "minLength": 1 },
+              "timeout": { "$ref": "#/$defs/duration", "default": "10s" },
+              "follow_redirects": { "type": "boolean", "default": true }
+            },
+            "required": ["url"]
+          }
+        },
+        {
+          "if": { "required": ["type"], "properties": { "type": { "const": "ssl" } } },
+          "then": {
+            "properties": {
+              "host": { "description": "A host name with an optional port, for example example.com:443.", "type": "string", "pattern": "^[A-Za-z0-9.-]+(:[0-9]{1,5})?$" },
+              "file": { "type": "string", "minLength": 1 }
+            },
+            "oneOf": [ { "required": ["host"] }, { "required": ["file"] } ]
+          }
+        },
+        {
+          "if": { "required": ["type"], "properties": { "type": { "const": "log" } } },
+          "then": {
+            "properties": {
+              "source": {
+                "type": "object",
+                "properties": {
+                  "file": { "type": "string", "minLength": 1 },
+                  "journal": { "type": "string" },
+                  "eventlog": { "type": "string", "minLength": 1 }
+                },
+                "minProperties": 1,
+                "maxProperties": 1,
+                "additionalProperties": false
+              },
+              "pattern": { "type": "string", "minLength": 1 }
+            },
+            "required": ["source", "pattern"]
+          }
+        },
+        {
+          "if": { "required": ["type"], "properties": { "type": { "const": "file" } } },
+          "then": {
+            "properties": { "path": { "type": "string", "minLength": 1 } },
+            "required": ["path", "alert_when"]
+          }
+        },
+        {
+          "if": { "required": ["type"], "properties": { "type": { "const": "command" } } },
+          "then": {
+            "properties": {
+              "run": {
+                "description": "The program and its arguments. Never run through a shell.",
+                "type": "array", "items": { "type": "string" }, "minItems": 1
+              },
+              "parse": { "enum": ["exit_code", "text", "number"], "default": "exit_code" },
+              "timeout": { "$ref": "#/$defs/duration", "default": "30s" }
+            },
+            "required": ["run", "alert_when"]
+          }
+        },
+        {
+          "if": { "required": ["type"], "properties": { "type": { "const": "heartbeat" } } },
+          "then": {
+            "properties": {
+              "expect_every": { "$ref": "#/$defs/duration" },
+              "grace": { "$ref": "#/$defs/duration", "default": "1m" }
+            },
+            "required": ["expect_every"]
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    }
+  }
+}

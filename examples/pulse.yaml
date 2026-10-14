@@ -1,0 +1,29 @@
+# pulse.yaml: the main settings for this server.
+#
+# `pulse init` creates this folder for you. After any change, run:
+#   pulse validate
+# It checks every file and tells you exactly what to fix.
+
+# Config format version. Leave this as 1.
+version: 1
+
+# The name shown in every alert, so you know which server it came from.
+# Letters, digits, dots, dashes and underscores.
+server_name: web-1
+
+# Settings every monitor uses unless the monitor sets its own.
+defaults:
+  # How urgent alerts are: info, warning or critical.
+  severity: warning
+
+  # Where alerts go. These are channel names from channels.yaml.
+  # Add one there first, then list it here, for example:
+  # notify: [ops-email]
+
+  # After an alert, wait this long before repeating it if the problem continues.
+  cooldown: 15m
+
+limits:
+  # If more alerts than this fire in one minute, pulse sends one summary
+  # instead of flooding you.
+  max_alerts_per_minute: 10

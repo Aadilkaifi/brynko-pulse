@@ -1,0 +1,47 @@
+# ── Internal: never pushed to the public repo ──────────────────────────────
+# Every internal file (plan, decisions, notes) lives under doc/. Public docs go in docs/.
+doc/
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+
+# ── Secrets and local config ──────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+# Real configs used while testing locally (examples live in examples/)
+/pulse.yaml
+/channels.yaml
+/monitors/
+
+# ── Go build output ───────────────────────────────────────────────────────
+/bin/
+/dist/
+/pulse
+/pulse.exe
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.*
+/vendor/
+
+# ── Local data written by pulse during development ───────────────────────
+/var/
+*.db
+*.log
+
+# ── Editors and OS ────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
