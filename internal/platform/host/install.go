@@ -20,7 +20,7 @@ type InstallOptions struct {
 	Source      string // the running binary, copied into place
 	ConfigDir   string
 	DataDir     string
-	AllowDocker bool // give the service user access to Docker (Linux)
+	AllowDocker bool // give the service user access to Docker, where Docker is installed (Linux)
 	// ContainerMonitors is how many container monitors are configured, so
 	// install can warn when they will lack access.
 	ContainerMonitors int

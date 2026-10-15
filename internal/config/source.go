@@ -46,9 +46,13 @@ func (d dirSource) files(rel string) ([]string, error) {
 type overlay struct {
 	base    source
 	changed map[string][]byte // relative, forward slashes
+	deleted map[string]bool
 }
 
 func (o overlay) open(rel string) (io.ReadCloser, error) {
+	if o.deleted[rel] {
+		return nil, fs.ErrNotExist
+	}
 	if data, ok := o.changed[rel]; ok {
 		return io.NopCloser(bytes.NewReader(data)), nil
 	}
@@ -61,9 +65,14 @@ func (o overlay) files(rel string) ([]string, error) {
 		return nil, err
 	}
 	seen := map[string]bool{}
+	kept := names[:0]
 	for _, n := range names {
+		if !o.deleted[path.Join(rel, n)] {
+			kept = append(kept, n)
+		}
 		seen[n] = true
 	}
+	names = kept
 	added := false
 	for p := range o.changed {
 		if dir, name := path.Split(p); path.Clean(dir) == rel && !seen[name] {

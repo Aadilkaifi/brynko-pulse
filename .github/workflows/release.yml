@@ -36,11 +36,22 @@ jobs:
             GOOS="$os" GOARCH="$arch" go build -trimpath -buildvcs=false -ldflags "$ldflags" \
               -o "dist/pulse_${version}_${os}_${arch}${ext}" ./cmd/pulse
           done
-          (cd dist && sha256sum pulse_* > SHA256SUMS)
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.48.0
+          mkdir -p dist/pkg
+          for arch in amd64 arm64; do
+            cp "dist/pulse_${version}_linux_${arch}" dist/pkg/pulse
+            for kind in deb rpm; do
+              VERSION="${version#v}" ARCH="$arch" nfpm package --config packaging/nfpm.yaml \
+                --packager "$kind" --target "dist/brynko-pulse_${version}_linux_${arch}.${kind}"
+            done
+          done
+          rm -r dist/pkg
+          cp install.sh dist/install.sh
+          (cd dist && sha256sum pulse_* brynko-pulse_* install.sh > SHA256SUMS)
 
       # Signing SHA256SUMS is added once the signing tool is chosen.
 
       - name: Draft release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" dist/* --draft --verify-tag --title "${GITHUB_REF_NAME}" --notes "Verify downloads against SHA256SUMS before installing."
+        run: gh release create "${GITHUB_REF_NAME}" dist/* --draft --verify-tag --title "${GITHUB_REF_NAME}" --notes "Install on Linux: curl -fsSL https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/install.sh | sudo sh. Verify downloads against SHA256SUMS. See docs/install.md."

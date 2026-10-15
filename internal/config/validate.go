@@ -50,7 +50,21 @@ func Validate(dir string) Result {
 // Load validates dir and returns the merged configuration. cfg is nil when the
 // result has errors.
 func Load(dir string) (*Config, Result) {
-	r, docs, secrets := validate(dir, dirSource(dir))
+	return loadFrom(dir, dirSource(dir))
+}
+
+// Preview returns the configuration as it would be after changes, without
+// writing anything. cfg is nil when the result has errors.
+func Preview(dir string, changes []Change) (*Config, Result) {
+	o, err := overlayFor(dir, changes)
+	if err != nil {
+		return nil, Result{Dir: dir, Errors: []Issue{{Message: err.Error()}}, Warnings: []Issue{}}
+	}
+	return loadFrom(dir, o)
+}
+
+func loadFrom(dir string, src source) (*Config, Result) {
+	r, docs, secrets := validate(dir, src)
 	if !r.OK() {
 		return nil, r
 	}
@@ -325,6 +339,7 @@ func crossCheck(docs []document, secrets Secrets, r *Result) {
 
 	monitorIDs := map[string]string{}
 	monitors := 0
+	var silent []Issue
 	for _, d := range docs {
 		if d.kind != kindMonitors {
 			continue
@@ -352,11 +367,18 @@ func crossCheck(docs []document, secrets Secrets, r *Result) {
 				}
 			}
 			if !has && len(defaultNotify) == 0 && len(channels) > 0 {
-				r.Warnings = append(r.Warnings, issueAt(d, base,
+				silent = append(silent, issueAt(d, base,
 					fmt.Sprintf("monitor %q has no channels, so its alerts go nowhere. Add notify here or under defaults in %s.", id, PulseFile)))
 			}
 		}
 	}
+	// One warning, not one per monitor, when the fix is a single line in pulse.yaml.
+	if len(silent) > 3 {
+		silent = []Issue{{File: PulseFile, Message: fmt.Sprintf(
+			"%d monitors have no channels, so their alerts go nowhere. Add notify under defaults in %s, for example notify: [%s].",
+			len(silent), PulseFile, firstKey(channels))}}
+	}
+	r.Warnings = append(r.Warnings, silent...)
 	if len(channels) == 0 && monitors > 0 {
 		r.Warnings = append(r.Warnings, Issue{File: ChannelsFile,
 			Message: "no alert channels are set up yet, so alerts go nowhere. Add one in " + ChannelsFile + "."})
@@ -447,4 +469,16 @@ func checkMaintenance(d document, monitorIDs map[string]string, r *Result) {
 			}
 		}
 	}
+}
+
+func firstKey(m map[string]bool) string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	if len(keys) == 0 {
+		return ""
+	}
+	return keys[0]
 }

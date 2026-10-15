@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -180,7 +181,7 @@ func TestHelperProcess(t *testing.T) {
 func helper(t *testing.T, mode, parse string, timeout time.Duration) Checker {
 	t.Setenv("PULSE_HELPER", mode)
 	return newCommand(config.Monitor{Run: []string{os.Args[0], "-test.run=TestHelperProcess"}, Parse: parse,
-		Timeout: config.Duration(timeout)}, 1024)
+		Timeout: config.Duration(timeout)}, Deps{OutputLimit: 1024})
 }
 
 func TestCommand(t *testing.T) {
@@ -200,9 +201,22 @@ func TestCommand(t *testing.T) {
 }
 
 func TestCommandMissingProgram(t *testing.T) {
-	c := newCommand(config.Monitor{Run: []string{"/no/such/program"}}, 1024)
+	c := newCommand(config.Monitor{Run: []string{"/no/such/program"}}, Deps{OutputLimit: 1024})
 	if _, err := c.Check(context.Background()); err == nil {
 		t.Fatal("missing program must fail")
+	}
+}
+
+type refusingPlatform struct{ *fakePlatform }
+
+func (refusingPlatform) PrepareCommand(*exec.Cmd) error { return errors.New("refused") }
+
+func TestCommandIsPreparedByThePlatform(t *testing.T) {
+	c := newCommand(config.Monitor{Run: []string{os.Args[0], "-test.run=TestHelperProcess"}},
+		Deps{OutputLimit: 1024, Platform: refusingPlatform{&fakePlatform{}}})
+	t.Setenv("PULSE_HELPER", "number")
+	if _, err := c.Check(context.Background()); err == nil || err.Error() != "refused" {
+		t.Fatalf("a refusal from the platform must stop the check, got %v", err)
 	}
 }
 

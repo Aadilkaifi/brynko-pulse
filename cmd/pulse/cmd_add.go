@@ -16,6 +16,21 @@ import (
 	"github.com/Aadilkaifi/brynko-pulse/internal/quickadd"
 )
 
+const addDetails = `Examples:
+  pulse add disk /data --above 85
+  pulse add memory
+  pulse add service nginx --notify ops-email
+  pulse add port 5432
+  pulse add http https://example.com/health --status 200
+  pulse add ssl example.com --days 21
+  pulse add file /var/backups/db.tar.gz --when "age > 1d"
+  pulse add heartbeat --id nightly-backup --every 1d
+  pulse add command --id queue-ok -- /usr/local/bin/check-queue --max 100
+
+Types: disk, memory, cpu, swap, load, service, process, container, port, http,
+ssl, file, heartbeat, command.
+The monitor is saved as monitors/<id>.yaml after the whole configuration is checked.`
+
 func cmdAdd(args []string, stdout, stderr io.Writer) int {
 	p := platformFor()
 	fs := newFlags("add", stderr)
@@ -36,26 +51,6 @@ func cmdAdd(args []string, stdout, stderr io.Writer) int {
 	fs.StringVar(&s.Grace, "grace", "", "heartbeat: extra time allowed before alerting")
 	dryRun := fs.Bool("dry-run", false, "show the monitor and check it, without saving")
 	asJSON := fs.Bool("json", false, "print JSON")
-	fs.Usage = func() {
-		fmt.Fprintf(stderr, `Usage: pulse add <type> [target] [flags]
-
-Examples:
-  pulse add disk /data --above 85
-  pulse add memory
-  pulse add service nginx --notify ops-email
-  pulse add port 5432
-  pulse add http https://example.com/health --status 200
-  pulse add ssl example.com --days 21
-  pulse add file /var/backups/db.tar.gz --when "age > 1d"
-  pulse add heartbeat --id nightly-backup --every 1d
-  pulse add command --id queue-ok -- /usr/local/bin/check-queue --max 100
-
-Types: %s
-The monitor is saved as monitors/<id>.yaml after the whole configuration is checked.
-
-`, strings.Join(quickadd.Types, ", "))
-		fs.PrintDefaults()
-	}
 	if fs.Parse(reorderFlags(args)) != nil {
 		return exitUsage
 	}

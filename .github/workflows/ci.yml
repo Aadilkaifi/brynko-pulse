@@ -49,3 +49,35 @@ jobs:
           GOOS=linux GOARCH=amd64 go build -o /dev/null ./cmd/pulse
           GOOS=linux GOARCH=arm64 go build -o /dev/null ./cmd/pulse
           GOOS=windows GOARCH=amd64 go build -o /dev/null ./cmd/pulse
+
+  # Builds and installs the .deb in a clean container, so packaging and the
+  # install script are checked on every change, not first at release time.
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Check shell scripts
+        run: shellcheck install.sh packaging/scripts/*.sh
+
+      - name: Build the packages
+        env:
+          CGO_ENABLED: "0"
+          VERSION: 0.0.0-ci
+          ARCH: amd64
+        run: |
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.48.0
+          mkdir -p dist/pkg
+          go build -trimpath -ldflags "-s -w" -o dist/pkg/pulse ./cmd/pulse
+          nfpm package --config packaging/nfpm.yaml --packager deb --target dist/test.deb
+          nfpm package --config packaging/nfpm.yaml --packager rpm --target dist/test.rpm
+
+      - name: Install the .deb without systemd
+        run: |
+          docker run --rm -v "$PWD/dist:/dist" ubuntu:24.04 sh -c '
+            apt-get update -qq && apt-get install -y -qq /dist/test.deb &&
+            pulse version && pulse validate --config /etc/brynko-pulse || true
+            test -x /usr/bin/pulse'

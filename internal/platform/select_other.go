@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os/exec"
 
 	"github.com/Aadilkaifi/brynko-pulse/internal/platform/host"
 )
@@ -32,6 +33,7 @@ func (unsupported) ProcessCount(string) (int, error)    { return 0, errOS }
 func (unsupported) CheckConfigSecure(string) error      { return nil }
 func (unsupported) SecureConfig(string) error           { return nil }
 func (unsupported) CheckSecretFile(string) error        { return nil }
+func (unsupported) PrepareCommand(*exec.Cmd) error      { return nil }
 func (unsupported) NewServiceWatcher(context.Context, *slog.Logger) (host.ServiceWatcher, error) {
 	return nil, errOS
 }

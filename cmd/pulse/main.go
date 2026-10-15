@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	_ "time/tzdata" // the same time zones on every system, for maintenance windows
 
 	"github.com/Aadilkaifi/brynko-pulse/internal/output"
@@ -24,21 +25,65 @@ func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
-var commands = map[string]func(args []string, stdout, stderr io.Writer) int{
-	"init":      cmdInit,
-	"validate":  cmdValidate,
-	"run":       cmdRun,
-	"status":    cmdStatus,
-	"history":   cmdHistory,
-	"test":      cmdTest,
-	"ping":      cmdPing,
-	"silence":   cmdSilence,
-	"add":       cmdAdd,
-	"discover":  cmdDiscover,
-	"install":   cmdInstall,
-	"uninstall": cmdUninstall,
-	"schema":    cmdSchema,
-	"version":   cmdVersion,
+// command is one pulse subcommand. The same table drives `pulse help`, each
+// command's -h and the generated docs/cli.md, so they cannot drift apart.
+type command struct {
+	name    string
+	section string
+	summary string
+	usage   string // what follows "pulse " in the synopsis
+	details string // examples or notes, shown in -h
+	run     func(args []string, stdout, stderr io.Writer) int
+}
+
+var commands []command
+
+// Filled in init: the run functions read this table for their help text.
+func init() {
+	commands = []command{
+		{name: "init", section: "Set up", summary: "Create the configuration folder with a starter setup",
+			usage: "init [flags]", run: cmdInit},
+		{name: "validate", section: "Set up", summary: "Check the configuration and explain any problems",
+			usage: "validate [flags]", run: cmdValidate},
+		{name: "discover", section: "Set up", summary: "Find services, containers and ports to monitor, and suggest monitors",
+			usage: "discover [--apply] [flags]", run: cmdDiscover},
+		{name: "add", section: "Set up", summary: "Add a monitor with one command",
+			usage: "add <type> [target] [flags] [-- program args...]", details: addDetails, run: cmdAdd},
+		{name: "config", section: "Set up", summary: "Show or change the configuration, one file at a time",
+			usage: "config show | get <file> | set <file> | delete <file> [flags]", details: configDetails, run: cmdConfig},
+		{name: "secret", section: "Set up", summary: "Store or remove a secret used by channels",
+			usage: "secret set <NAME> | secret delete <NAME> [flags]", details: secretDetails, run: cmdSecret},
+		{name: "test", section: "Set up", summary: "Send a test alert, or run one monitor once",
+			usage: "test channel <name> | test monitor <id> [flags]", details: testDetails, run: cmdTest},
+		{name: "install", section: "Run", summary: "Run pulse as a background service that starts at boot",
+			usage: "install [flags]", run: cmdInstall},
+		{name: "uninstall", section: "Run", summary: "Stop and remove the service (keeps the configuration)",
+			usage: "uninstall [--purge] [flags]", run: cmdUninstall},
+		{name: "run", section: "Run", summary: "Start monitoring in this terminal (runs until stopped)",
+			usage: "run [flags]", run: cmdRun},
+		{name: "status", section: "Run", summary: "Show every monitor and channel right now",
+			usage: "status [flags]", run: cmdStatus},
+		{name: "history", section: "Run", summary: "Show recent alerts",
+			usage: "history [flags]", run: cmdHistory},
+		{name: "silence", section: "Run", summary: "Pause alerts for a while, for example during a deploy",
+			usage:   "silence <monitor-id|all> <duration> [--reason text] | silence list | silence clear <monitor-id|all>",
+			details: silenceDetails, run: cmdSilence},
+		{name: "ping", section: "Run", summary: "Record a heartbeat, for jobs that check in",
+			usage: "ping <heartbeat-monitor-id> [flags]", run: cmdPing},
+		{name: "schema", section: "Other", summary: "Print the JSON Schema for the configuration files",
+			usage: "schema", run: cmdSchema},
+		{name: "version", section: "Other", summary: "Show the version",
+			usage: "version [flags]", run: cmdVersion},
+	}
+}
+
+func findCommand(name string) (command, bool) {
+	for _, c := range commands {
+		if c.name == name {
+			return c, true
+		}
+	}
+	return command{}, false
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
@@ -50,49 +95,50 @@ func run(args []string, stdout, stderr io.Writer) int {
 		usage(stdout)
 		return exitOK
 	}
-	cmd, ok := commands[args[0]]
+	cmd, ok := findCommand(args[0])
 	if !ok {
 		fmt.Fprintf(stderr, "Unknown command %q.\n\n", args[0])
 		usage(stderr)
 		return exitUsage
 	}
-	return cmd(args[1:], stdout, stderr)
+	return cmd.run(args[1:], stdout, stderr)
 }
 
 func usage(w io.Writer) {
-	fmt.Fprint(w, `pulse watches a server and alerts you when something breaks.
-
-Usage:
-  pulse <command> [flags]
-
-Set up:
-  init       Create the configuration folder with a starter setup
-  validate   Check the configuration and explain any problems
-  discover   Find services, containers and ports to monitor, and suggest monitors
-  add        Add a monitor with one command, for example: pulse add disk /data --above 85
-  test       Send a test alert, or run one monitor once
-
-Run:
-  install    Run pulse as a background service that starts at boot
-  uninstall  Stop and remove the service (keeps the configuration)
-  run        Start monitoring in this terminal (runs until stopped)
-  status     Show every monitor and channel right now
-  history    Show recent alerts
-  silence    Pause alerts for a while, for example during a deploy
-  ping       Record a heartbeat, for jobs that check in
-
-Other:
-  schema     Print the JSON Schema for the configuration files
-  version    Show the version
-
-Run "pulse <command> -h" for the flags of a command.
-`)
+	fmt.Fprint(w, "pulse watches a server and alerts you when something breaks.\n\nUsage:\n  pulse <command> [flags]\n")
+	section := ""
+	for _, c := range commands {
+		if c.section != section {
+			section = c.section
+			fmt.Fprintf(w, "\n%s:\n", section)
+		}
+		fmt.Fprintf(w, "  %-10s %s\n", c.name, c.summary)
+	}
+	fmt.Fprint(w, "\nRun \"pulse <command> -h\" for the flags of a command.\n")
 }
 
+// newFlags returns the flag set for a command, with help built from the
+// command table.
 func newFlags(name string, stderr io.Writer) *flag.FlagSet {
 	fs := flag.NewFlagSet("pulse "+name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	c, _ := findCommand(name)
+	fs.Usage = func() { commandHelp(stderr, c, fs) }
 	return fs
+}
+
+func commandHelp(w io.Writer, c command, fs *flag.FlagSet) {
+	fmt.Fprintf(w, "%s.\n\nUsage:\n  pulse %s\n", c.summary, c.usage)
+	if c.details != "" {
+		fmt.Fprintf(w, "\n%s\n", strings.TrimRight(c.details, "\n"))
+	}
+	hasFlags := false
+	fs.VisitAll(func(*flag.Flag) { hasFlags = true })
+	if hasFlags {
+		fmt.Fprint(w, "\nFlags:\n")
+		fs.SetOutput(w)
+		fs.PrintDefaults()
+	}
 }
 
 // envelope is the start of every --json answer.

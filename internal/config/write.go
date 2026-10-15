@@ -6,6 +6,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -31,6 +32,7 @@ type Change struct {
 	Path       string // relative, forward slashes, for example monitors/web.yaml
 	Data       []byte
 	CreateOnly bool // fail instead of replacing an existing file
+	Delete     bool // remove the file; only monitor files can be removed
 }
 
 // Apply is the one way pulse changes its own configuration. It validates the
@@ -43,6 +45,12 @@ func Apply(dir string, changes []Change) (Result, error) {
 	}
 	for _, c := range changes {
 		target := filepath.Join(dir, filepath.FromSlash(c.Path))
+		if c.Delete {
+			if err := os.Remove(target); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return res, err
+			}
+			continue
+		}
 		if err := os.MkdirAll(filepath.Dir(target), dirPerm); err != nil {
 			return res, err
 		}
@@ -63,24 +71,42 @@ func Check(dir string, changes []Change) Result {
 }
 
 func check(dir string, changes []Change) (Result, error) {
-	empty := Result{Dir: dir, Errors: []Issue{}, Warnings: []Issue{}}
-	o := overlay{base: dirSource(dir), changed: map[string][]byte{}}
-	for _, c := range changes {
-		if err := checkChangePath(c.Path); err != nil {
-			return empty, err
-		}
-		if c.CreateOnly {
-			if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(c.Path))); err == nil {
-				return empty, fmt.Errorf("%s already exists; nothing was written", c.Path)
-			}
-		}
-		o.changed[c.Path] = c.Data
+	o, err := overlayFor(dir, changes)
+	if err != nil {
+		return Result{Dir: dir, Errors: []Issue{}, Warnings: []Issue{}}, err
 	}
 	res, _, _ := validate(dir, o)
 	if !res.OK() {
 		return res, ErrInvalid
 	}
 	return res, nil
+}
+
+// overlayFor is the configuration folder as it would be after changes.
+func overlayFor(dir string, changes []Change) (overlay, error) {
+	o := overlay{base: dirSource(dir), changed: map[string][]byte{}, deleted: map[string]bool{}}
+	for _, c := range changes {
+		if err := checkChangePath(c.Path); err != nil {
+			return o, err
+		}
+		if c.Delete {
+			if path.Dir(c.Path) != MonitorsDir {
+				return o, fmt.Errorf("%s cannot be deleted; edit it instead", c.Path)
+			}
+			if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(c.Path))); err != nil {
+				return o, fmt.Errorf("%s does not exist", c.Path)
+			}
+			o.deleted[c.Path] = true
+			continue
+		}
+		if c.CreateOnly {
+			if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(c.Path))); err == nil {
+				return o, fmt.Errorf("%s already exists; nothing was written", c.Path)
+			}
+		}
+		o.changed[c.Path] = c.Data
+	}
+	return o, nil
 }
 
 // checkChangePath allows only the files pulse reads, so a change can never

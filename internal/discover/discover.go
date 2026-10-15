@@ -23,11 +23,27 @@ type Suggestion struct {
 	YAML string `json:"yaml"`
 }
 
-// Suggest returns monitors for inv and containers that cfg does not cover yet.
-// rootDisk is the system disk, for when no disk monitor exists.
-func Suggest(inv host.Inventory, containers []string, cfg *config.Config, rootDisk string) []Suggestion {
+// Only web ports get a suggested port check: web servers accept and drop a bare
+// connection quietly, while databases, SSH and brokers log it as a failed client
+// (MySQL can even block the address). Everything else is watched through its
+// service or container monitor.
+var webPorts = map[int]bool{80: true, 443: true}
+
+func portTarget(p host.ListenPort) string {
+	switch p.Address {
+	case "", "0.0.0.0", "::", "127.0.0.1":
+		return strconv.Itoa(p.Port)
+	}
+	return joinHostPort(p.Address, p.Port)
+}
+
+// Suggest returns monitors for inv and containers that cfg does not cover yet,
+// and notes about what it left out on purpose. rootDisk is the system disk,
+// for when no disk monitor exists.
+func Suggest(inv host.Inventory, containers []string, cfg *config.Config, rootDisk string) ([]Suggestion, []string) {
 	have := watched(cfg)
 	var out []Suggestion
+	var skipped []string
 	add := func(s quickadd.Spec, key, why string) {
 		if have[key] {
 			return
@@ -54,16 +70,23 @@ func Suggest(inv host.Inventory, containers []string, cfg *config.Config, rootDi
 		add(quickadd.Spec{Type: "container", Target: c}, "container:"+c, "the "+c+" container is running")
 	}
 	for _, p := range inv.Ports {
-		target := strconv.Itoa(p.Port)
-		switch p.Address {
-		case "", "0.0.0.0", "::", "127.0.0.1":
-		default:
-			target = joinHostPort(p.Address, p.Port)
+		if !webPorts[p.Port] || have["port:"+strconv.Itoa(p.Port)] {
+			continue
 		}
-		add(quickadd.Spec{Type: "port", Target: target}, "port:"+strconv.Itoa(p.Port),
-			fmt.Sprintf("something listens on port %d", p.Port))
+		add(quickadd.Spec{Type: "port", Target: portTarget(p)}, "port:"+strconv.Itoa(p.Port),
+			fmt.Sprintf("the web server listens on port %d", p.Port))
 	}
-	return out
+	others := 0
+	for _, p := range inv.Ports {
+		if !webPorts[p.Port] {
+			others++
+		}
+	}
+	if others > 0 {
+		skipped = append(skipped, "other listening ports get no port check: their service or container monitor covers them, "+
+			"and a bare connection shows up in many programs' logs as a failed client. Add one with: pulse add port <number>")
+	}
+	return out, skipped
 }
 
 func joinHostPort(addr string, port int) string {

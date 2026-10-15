@@ -14,7 +14,6 @@ import (
 
 	"github.com/Aadilkaifi/brynko-pulse/internal/alert"
 	"github.com/Aadilkaifi/brynko-pulse/internal/engine"
-	"github.com/Aadilkaifi/brynko-pulse/internal/platform"
 	"github.com/Aadilkaifi/brynko-pulse/internal/store"
 )
 
@@ -23,9 +22,9 @@ const staleAfter = time.Minute
 
 func cmdStatus(args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("status", stderr)
-	dataDir := fs.String("data", platform.Current().DataDir(), "where state and alert history are kept")
+	dataDir := fs.String("data", platformFor().DataDir(), "where state and alert history are kept")
 	asJSON := fs.Bool("json", false, "print JSON")
-	if fs.Parse(args) != nil {
+	if fs.Parse(reorderFlags(args)) != nil {
 		return exitUsage
 	}
 
@@ -120,10 +119,10 @@ func channelState(c store.ChannelStatus) string {
 
 func cmdHistory(args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("history", stderr)
-	dataDir := fs.String("data", platform.Current().DataDir(), "where state and alert history are kept")
+	dataDir := fs.String("data", platformFor().DataDir(), "where state and alert history are kept")
 	limit := fs.Int("limit", 20, "how many alerts to show, newest first")
 	asJSON := fs.Bool("json", false, "print JSON")
-	if fs.Parse(args) != nil {
+	if fs.Parse(reorderFlags(args)) != nil {
 		return exitUsage
 	}
 	var err error

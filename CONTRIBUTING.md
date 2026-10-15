@@ -20,6 +20,17 @@ go test -race ./...
 
 `gofmt` must report nothing. CI runs all of this on Linux and Windows.
 
+## Docs
+
+A change a user can see updates the docs in `docs/` in the same pull request. Two pages are
+generated and must not be edited by hand; after changing a command, a flag or the schema, run:
+
+```sh
+go test ./cmd/pulse ./schema -run Docs -update
+```
+
+See [docs/build.md](docs/build.md) for building, packaging and releases.
+
 ## Code
 
 - Code that differs by operating system lives only in `internal/platform`, selected by build tags.

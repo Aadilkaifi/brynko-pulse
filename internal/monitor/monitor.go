@@ -73,7 +73,7 @@ func New(m config.Monitor, d Deps) (Checker, string, error) {
 	case "file":
 		return &file{path: m.Path}, "", nil
 	case "command":
-		return newCommand(m, d.OutputLimit), "exit_code != 0", nil
+		return newCommand(m, d), "exit_code != 0", nil
 	case "heartbeat":
 		return &heartbeat{dir: d.DataDir, id: m.ID, every: m.ExpectEvery.D(), grace: orDur(m.Grace, time.Minute),
 			started: d.Started}, "late == 1", nil

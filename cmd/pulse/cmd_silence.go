@@ -18,6 +18,15 @@ import (
 
 const maxReason = 200
 
+const silenceDetails = `Examples:
+  pulse silence web 1h --reason deploy   one monitor
+  pulse silence all 30m                  every monitor
+  pulse silence list                     silences in force
+  pulse silence clear web                end one early ("all" ends every one)
+
+Monitors keep being checked while silenced. If one is still failing when the
+silence ends, you get one alert.`
+
 func cmdSilence(args []string, stdout, stderr io.Writer) int {
 	p := platformFor()
 	fs := newFlags("silence", stderr)
@@ -25,17 +34,6 @@ func cmdSilence(args []string, stdout, stderr io.Writer) int {
 	dataDir := fs.String("data", p.DataDir(), "where state and alert history are kept")
 	reason := fs.String("reason", "", "why, shown in pulse status and the history")
 	asJSON := fs.Bool("json", false, "print JSON")
-	fs.Usage = func() {
-		fmt.Fprint(stderr, `Usage:
-  pulse silence <monitor-id|all> <duration> [--reason text]   pause alerts, for example: pulse silence web 1h --reason deploy
-  pulse silence list                                          show silences in force
-  pulse silence clear <monitor-id|all>                        end a silence ("all" ends every one)
-
-Monitors keep being checked while silenced. If one is still failing when the
-silence ends, you get one alert.
-`)
-		fs.PrintDefaults()
-	}
 	// Flags may follow the positional arguments, as in the usage line.
 	if fs.Parse(reorderFlags(args)) != nil {
 		return exitUsage
@@ -85,7 +83,7 @@ silence ends, you get one alert.
 			target = "Every monitor is"
 		}
 		fmt.Fprintf(stdout, "%s silenced until %s (%s).\nEnd it early with: pulse silence clear %s\n",
-			target, s.Until.Local().Format("2006-01-02 15:04"), alert.Human(s.Until.Sub(now)), s.Monitor)
+			target, s.Until.Local().Format("2006-01-02 15:04"), alert.Human(s.Until.Sub(now).Round(time.Minute)), s.Monitor)
 		return exitOK
 	}
 	fs.Usage()
@@ -150,7 +148,7 @@ func printSilences(stdout, stderr io.Writer, asJSON bool, list []silence.Silence
 	fmt.Fprintln(tw, "MONITOR\tUNTIL\tLEFT\tREASON")
 	for _, s := range list {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", s.Monitor, s.Until.Local().Format("2006-01-02 15:04"),
-			alert.Human(time.Until(s.Until)), oneLine(s.Reason))
+			alert.Human(time.Until(s.Until).Round(time.Minute)), oneLine(s.Reason))
 	}
 	tw.Flush()
 	return exitOK
@@ -182,7 +180,7 @@ func reorderFlags(args []string) []string {
 // flags are the exception, so they are listed here.
 func takesValue(flag string) bool {
 	switch strings.TrimLeft(flag, "-") {
-	case "json", "dry-run", "yes", "purge", "allow-docker", "h", "help":
+	case "json", "dry-run", "yes", "purge", "no-docker", "no-discover", "apply", "h", "help":
 		return false
 	}
 	return true

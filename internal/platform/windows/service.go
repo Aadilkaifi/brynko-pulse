@@ -56,9 +56,6 @@ func (p Platform) Install(ctx context.Context, o host.InstallOptions) (host.Inst
 	if !windows.GetCurrentProcessToken().IsElevated() {
 		return res, fmt.Errorf("install: %w. Open the terminal with Run as administrator", host.ErrNotAdmin)
 	}
-	if o.AllowDocker {
-		return res, errors.New("--allow-docker is for Linux. Container monitors are not available on Windows yet")
-	}
 
 	m, err := mgr.Connect()
 	if err != nil {

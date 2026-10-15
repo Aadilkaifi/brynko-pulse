@@ -65,7 +65,7 @@
     },
     "severity": { "type": "string", "enum": ["info", "warning", "critical"] },
     "envRef": {
-      "description": "A secret must come from an environment variable, written as ${NAME}.",
+      "description": "Secrets are never written here: write ${NAME} and put NAME=value in secrets.env.",
       "type": "string",
       "pattern": "^\\$\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
     },
@@ -96,12 +96,12 @@
     "defaults": {
       "type": "object",
       "properties": {
-        "severity": { "$ref": "#/$defs/severity", "default": "warning" },
-        "notify": { "$ref": "#/$defs/notifyList" },
-        "for": { "$ref": "#/$defs/duration" },
-        "cooldown": { "$ref": "#/$defs/duration", "default": "15m" },
-        "interval": { "$ref": "#/$defs/duration", "default": "30s" },
-        "flapping": { "$ref": "#/$defs/flapping" }
+        "severity": { "$ref": "#/$defs/severity", "default": "warning", "description": "How urgent alerts are." },
+        "notify": { "$ref": "#/$defs/notifyList", "description": "Channels for monitors that set none." },
+        "for": { "$ref": "#/$defs/duration", "description": "How long a problem must last before alerting." },
+        "cooldown": { "$ref": "#/$defs/duration", "default": "15m", "description": "How often to repeat an alert while the problem continues." },
+        "interval": { "$ref": "#/$defs/duration", "default": "30s", "description": "How often each monitor is checked." },
+        "flapping": { "$ref": "#/$defs/flapping", "description": "Flapping detection." }
       },
       "additionalProperties": false
     },
@@ -172,8 +172,8 @@
     "channel": {
       "type": "object",
       "properties": {
-        "type": { "enum": ["smtp", "whatsapp", "telegram", "slack", "webhook", "brynko"] },
-        "min_severity": { "$ref": "#/$defs/severity", "default": "info" }
+        "type": { "enum": ["smtp", "whatsapp", "telegram", "slack", "webhook", "brynko"], "description": "Where the alert goes; each type adds its own fields below." },
+        "min_severity": { "$ref": "#/$defs/severity", "default": "info", "description": "Send only alerts at or above this severity." }
       },
       "required": ["type"],
       "allOf": [
@@ -261,20 +261,21 @@
     "monitor": {
       "type": "object",
       "properties": {
-        "id": { "$ref": "#/$defs/id" },
+        "id": { "$ref": "#/$defs/id", "description": "Unique name, used by status, history, silences and ping." },
         "type": {
+          "description": "What to watch; each type adds its own fields below.",
           "enum": ["cpu", "memory", "load", "swap", "disk", "service", "container", "process",
                    "port", "http", "ssl", "log", "file", "command", "heartbeat"]
         },
-        "name": { "type": "string", "maxLength": 120 },
-        "enabled": { "type": "boolean", "default": true },
-        "interval": { "$ref": "#/$defs/duration" },
-        "alert_when": { "$ref": "#/$defs/condition" },
-        "clear_when": { "$ref": "#/$defs/condition" },
-        "for": { "$ref": "#/$defs/duration" },
-        "severity": { "$ref": "#/$defs/severity" },
-        "notify": { "$ref": "#/$defs/notifyList" },
-        "cooldown": { "$ref": "#/$defs/duration" }
+        "name": { "type": "string", "maxLength": 120, "description": "Name shown in alerts. Default: the id." },
+        "enabled": { "type": "boolean", "default": true, "description": "false keeps the monitor but stops checking it." },
+        "interval": { "$ref": "#/$defs/duration", "description": "How often to check. Default: defaults.interval." },
+        "alert_when": { "$ref": "#/$defs/condition", "description": "The comparison that means something is wrong. Some types have a default." },
+        "clear_when": { "$ref": "#/$defs/condition", "description": "When it counts as fixed again, to avoid alerts going on and off around a threshold." },
+        "for": { "$ref": "#/$defs/duration", "description": "How long alert_when must hold before alerting." },
+        "severity": { "$ref": "#/$defs/severity", "description": "Default: defaults.severity." },
+        "notify": { "$ref": "#/$defs/notifyList", "description": "Channels for this monitor. Default: defaults.notify." },
+        "cooldown": { "$ref": "#/$defs/duration", "description": "How often to repeat while it keeps failing. Default: defaults.cooldown." }
       },
       "required": ["id", "type"],
       "allOf": [
@@ -356,6 +357,7 @@
             "properties": {
               "source": {
                 "type": "object",
+                "description": "Exactly one of: file (a path), journal (a systemd unit, or empty for the whole journal), eventlog (a Windows channel such as Application).",
                 "properties": {
                   "file": { "type": "string", "minLength": 1 },
                   "journal": { "type": "string" },

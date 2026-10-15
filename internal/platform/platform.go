@@ -8,6 +8,7 @@ package platform
 import (
 	"context"
 	"log/slog"
+	"os/exec"
 
 	"github.com/Aadilkaifi/brynko-pulse/internal/platform/host"
 )
@@ -42,6 +43,10 @@ type Platform interface {
 	// CheckSecretFile returns an error when people other than administrators and
 	// the pulse service could read or change the secrets file. A missing file is fine.
 	CheckSecretFile(path string) error
+
+	// PrepareCommand adjusts a command check before it starts, so it never runs
+	// with more rights than the service account has.
+	PrepareCommand(cmd *exec.Cmd) error
 
 	// Install sets pulse up as a background service that starts at boot.
 	// Running it again updates the binary and the service in place.

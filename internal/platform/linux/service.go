@@ -26,11 +26,12 @@ import (
 )
 
 const (
-	binaryPath   = "/usr/local/bin/pulse"
-	unitPath     = "/etc/systemd/system/" + host.ServiceName + ".service"
-	serviceUser  = host.ServiceName
-	dockerGroup  = "docker"
-	journalGroup = "systemd-journal"
+	binaryPath     = "/usr/local/bin/pulse"
+	packagedBinary = "/usr/bin/pulse" // where the .deb and .rpm put it
+	unitPath       = "/etc/systemd/system/" + host.ServiceName + ".service"
+	serviceUser    = host.ServiceName
+	dockerGroup    = "docker"
+	journalGroup   = "systemd-journal"
 )
 
 // Paths systemd can take without quoting or specifier surprises.
@@ -40,7 +41,8 @@ var safeUnitPath = regexp.MustCompile(`^/[A-Za-z0-9._/@+:-]+$`)
 // access to the config and write access to the data folder, and starts the
 // systemd unit. Running it again updates everything in place.
 func (p Platform) Install(ctx context.Context, o host.InstallOptions) (host.InstallResult, error) {
-	res := host.InstallResult{Binary: binaryPath, Service: host.ServiceName, Account: serviceUser,
+	bin := installedBinary(o.Source)
+	res := host.InstallResult{Binary: bin, Service: host.ServiceName, Account: serviceUser,
 		Steps: []string{}, Warnings: []string{},
 		Next: []string{
 			"See what it is watching: pulse status",
@@ -51,7 +53,7 @@ func (p Platform) Install(ctx context.Context, o host.InstallOptions) (host.Inst
 	if err := preflight(); err != nil {
 		return res, err
 	}
-	unit, err := unitFile(binaryPath, o.ConfigDir, o.DataDir)
+	unit, err := unitFile(bin, o.ConfigDir, o.DataDir)
 	if err != nil {
 		return res, err
 	}
@@ -83,16 +85,22 @@ func (p Platform) Install(ctx context.Context, o host.InstallOptions) (host.Inst
 			f, serviceUser, serviceUser))
 	}
 	if o.ContainerMonitors > 0 && !o.AllowDocker {
-		res.Warnings = append(res.Warnings, fmt.Sprintf("%d container monitor(s) cannot reach Docker. To allow it, run pulse install --allow-docker. "+
-			"Docker access is equivalent to root, so only do this if you need container monitors.", o.ContainerMonitors))
+		res.Warnings = append(res.Warnings, fmt.Sprintf("%d container monitor(s) cannot reach Docker because of --no-docker. Run pulse install without it to allow them.", o.ContainerMonitors))
 	}
 
-	copied, err := fsutil.CopyAtomic(o.Source, binaryPath, 0o755)
-	if err != nil {
-		return res, fmt.Errorf("copy pulse to %s: %w", binaryPath, err)
-	}
-	if copied {
-		step("Copied pulse to " + binaryPath)
+	if bin == packagedBinary {
+		// A copy from an earlier manual install would come first in PATH.
+		if err := os.Remove(binaryPath); err == nil {
+			step("Removed the older copy at " + binaryPath + "; the package's " + packagedBinary + " is used")
+		}
+	} else {
+		copied, err := fsutil.CopyAtomic(o.Source, binaryPath, 0o755)
+		if err != nil {
+			return res, fmt.Errorf("copy pulse to %s: %w", binaryPath, err)
+		}
+		if copied {
+			step("Copied pulse to " + binaryPath)
+		}
 	}
 	if err := shareConfig(o.ConfigDir, gid); err != nil {
 		return res, err
@@ -165,6 +173,15 @@ func (Platform) ReloadService(ctx context.Context) (bool, error) {
 // RunAsService reports false: systemd runs `pulse run` as a normal process and
 // stops or reloads it with signals.
 func (Platform) RunAsService(host.ServiceFunc) (bool, error) { return false, nil }
+
+// installedBinary is where the service runs pulse from: the package's copy
+// when the package manager installed it, otherwise our own copy.
+func installedBinary(source string) string {
+	if source == packagedBinary {
+		return packagedBinary
+	}
+	return binaryPath
+}
 
 func preflight() error {
 	if os.Geteuid() != 0 {
@@ -250,11 +267,8 @@ func nologin() string {
 }
 
 // setDockerAccess makes docker group membership match the request, so running
-// install again without --allow-docker takes the access away.
+// install again with --no-docker takes the access away. Without Docker it does nothing.
 func setDockerAccess(ctx context.Context, u *user.User, allow bool) (string, error) {
-	if _, err := user.LookupGroup(dockerGroup); err != nil && allow {
-		return "", errors.New("--allow-docker was given but Docker is not installed here (there is no docker group)")
-	}
 	return setGroup(ctx, u, dockerGroup, allow,
 		"Gave "+serviceUser+" access to Docker (membership of the docker group is equivalent to root)",
 		"Removed Docker access from "+serviceUser)

@@ -20,7 +20,7 @@ import (
 func cmdVersion(args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("version", stderr)
 	asJSON := fs.Bool("json", false, "print JSON")
-	if fs.Parse(args) != nil {
+	if fs.Parse(reorderFlags(args)) != nil {
 		return exitUsage
 	}
 	info := version.Get()
@@ -37,7 +37,7 @@ func cmdVersion(args []string, stdout, stderr io.Writer) int {
 
 func cmdSchema(args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("schema", stderr)
-	if fs.Parse(args) != nil {
+	if fs.Parse(reorderFlags(args)) != nil {
 		return exitUsage
 	}
 	if _, err := stdout.Write(schema.JSON); err != nil {
@@ -48,16 +48,18 @@ func cmdSchema(args []string, stdout, stderr io.Writer) int {
 }
 
 func cmdInit(args []string, stdout, stderr io.Writer) int {
-	host, _ := os.Hostname()
-	p := platform.Current()
+	p := platformFor()
 	fs := newFlags("init", stderr)
 	dir := fs.String("config", p.ConfigDir(), "configuration directory to create")
-	name := fs.String("server-name", host, "name shown in alerts (defaults to this machine's host name)")
+	name := fs.String("server-name", "", "name shown in alerts (default: this machine's host name)")
 	asJSON := fs.Bool("json", false, "print JSON")
-	if fs.Parse(args) != nil {
+	if fs.Parse(reorderFlags(args)) != nil {
 		return exitUsage
 	}
 
+	if *name == "" {
+		*name, _ = os.Hostname()
+	}
 	res, err := initConfig(p, *dir, *name)
 	if *asJSON {
 		return finishJSON(stdout, stderr, struct {
@@ -109,9 +111,9 @@ func initErrorMessage(dir string, err error) string {
 
 func cmdValidate(args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("validate", stderr)
-	dir := fs.String("config", platform.Current().ConfigDir(), "configuration directory")
+	dir := fs.String("config", platformFor().ConfigDir(), "configuration directory")
 	asJSON := fs.Bool("json", false, "print JSON")
-	if fs.Parse(args) != nil {
+	if fs.Parse(reorderFlags(args)) != nil {
 		return exitUsage
 	}
 

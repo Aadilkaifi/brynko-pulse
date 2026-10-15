@@ -42,14 +42,19 @@ func (c *file) Check(context.Context) (rule.Values, error) {
 }
 
 type command struct {
+	prepare func(*exec.Cmd) error
 	run     []string
 	parse   string
 	timeout time.Duration
 	limit   int
 }
 
-func newCommand(m config.Monitor, limit int) Checker {
-	return &command{run: m.Run, parse: or(m.Parse, "exit_code"), timeout: orDur(m.Timeout, 30*time.Second), limit: limit}
+func newCommand(m config.Monitor, d Deps) Checker {
+	var prepare func(*exec.Cmd) error
+	if d.Platform != nil {
+		prepare = d.Platform.PrepareCommand
+	}
+	return &command{prepare: prepare, run: m.Run, limit: d.OutputLimit, parse: or(m.Parse, "exit_code"), timeout: orDur(m.Timeout, 30*time.Second)}
 }
 
 // limitedBuffer keeps the first n bytes and discards the rest.
@@ -73,6 +78,11 @@ func (c *command) Check(ctx context.Context) (rule.Values, error) {
 	out := &limitedBuffer{n: c.limit}
 	cmd.Stdout, cmd.Stderr = out, out
 	cmd.WaitDelay = 5 * time.Second
+	if c.prepare != nil {
+		if err := c.prepare(cmd); err != nil {
+			return nil, err
+		}
+	}
 	err := cmd.Run()
 	if ctx.Err() == context.DeadlineExceeded {
 		return nil, fmt.Errorf("%s did not finish within %v", c.run[0], c.timeout)

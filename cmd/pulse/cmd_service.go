@@ -35,9 +35,10 @@ func cmdInstall(args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("install", stderr)
 	cfgDir := fs.String("config", p.ConfigDir(), "configuration directory (created with a starter setup if missing)")
 	dataDir := fs.String("data", p.DataDir(), "where state and alert history are kept")
-	allowDocker := fs.Bool("allow-docker", false, "let the service use Docker, for container monitors (equivalent to root)")
+	noDocker := fs.Bool("no-docker", false, "do not let the service use Docker; container monitors will not work (Linux)")
+	noDiscover := fs.Bool("no-discover", false, "on a first install, do not add monitors for what discover finds")
 	asJSON := fs.Bool("json", false, "print JSON")
-	if fs.Parse(args) != nil {
+	if fs.Parse(reorderFlags(args)) != nil {
 		return exitUsage
 	}
 	if fs.NArg() != 0 {
@@ -45,16 +46,20 @@ func cmdInstall(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 
-	res, initRes, err := install(p, *cfgDir, *dataDir, *allowDocker)
+	res, initRes, added, err := install(p, *cfgDir, *dataDir, !*noDocker, !*noDiscover)
 	if *asJSON {
 		return finishJSON(stdout, stderr, struct {
 			envelope
-			ConfigCreated bool `json:"config_created"`
+			ConfigCreated bool     `json:"config_created"`
+			Discovered    []string `json:"discovered"`
 			host.InstallResult
-		}{newEnvelope("install", err), len(initRes.Created) > 0, res}, err)
+		}{newEnvelope("install", err), len(initRes.Created) > 0, added, res}, err)
 	}
 	if len(initRes.Created) > 0 {
 		fmt.Fprintf(stdout, "Created the starter configuration in %s\n", initRes.Dir)
+	}
+	if len(added) > 0 {
+		fmt.Fprintf(stdout, "Added %d monitor(s) for what runs here: %s\n", len(added), strings.Join(added, ", "))
 	}
 	printSteps(stdout, res.Steps)
 	for _, w := range res.Warnings {
@@ -73,21 +78,34 @@ func cmdInstall(args []string, stdout, stderr io.Writer) int {
 
 // install checks everything it can before changing the system, so a bad
 // configuration never leaves a half-installed service behind.
-func install(p platform.Platform, cfgDir, dataDir string, allowDocker bool) (host.InstallResult, config.InitResult, error) {
+func install(p platform.Platform, cfgDir, dataDir string, allowDocker, discoverNew bool) (host.InstallResult, config.InitResult, []string, error) {
 	var initRes config.InitResult
+	var added []string
 	cfgDir, dataDir, err := absDirs(cfgDir, dataDir)
 	if err != nil {
-		return host.InstallResult{}, initRes, err
+		return host.InstallResult{}, initRes, nil, err
 	}
 	if _, err := os.Stat(filepath.Join(cfgDir, config.PulseFile)); errors.Is(err, os.ErrNotExist) {
 		hostname, _ := os.Hostname()
 		if initRes, err = initConfig(p, cfgDir, hostname); err != nil {
-			return host.InstallResult{}, initRes, err
+			return host.InstallResult{}, initRes, nil, err
+		}
+		// A first install watches what already runs here, so nobody has to
+		// list every service by hand. Later installs never add monitors.
+		if discoverNew {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			list, _, derr := suggestMonitors(ctx, p, cfgDir)
+			cancel()
+			if derr == nil && len(list) > 0 && saveSuggestions(cfgDir, list) == nil {
+				for _, s := range list {
+					added = append(added, s.ID)
+				}
+			}
 		}
 	}
 	cfg, err := runner.Load(runner.Options{ConfigDir: cfgDir, Platform: p})
 	if err != nil {
-		return host.InstallResult{}, initRes, err
+		return host.InstallResult{}, initRes, added, err
 	}
 	opts := host.InstallOptions{ConfigDir: cfgDir, DataDir: dataDir, AllowDocker: allowDocker}
 	for _, m := range cfg.Monitors {
@@ -106,14 +124,14 @@ func install(p platform.Platform, cfgDir, dataDir string, allowDocker bool) (hos
 		src, err = filepath.EvalSymlinks(src)
 	}
 	if err != nil {
-		return host.InstallResult{}, initRes, fmt.Errorf("cannot find the running pulse binary: %w", err)
+		return host.InstallResult{}, initRes, added, fmt.Errorf("cannot find the running pulse binary: %w", err)
 	}
 
 	ctx, cancel := signalContext(installTimeout)
 	defer cancel()
 	opts.Source = src
 	res, err := p.Install(ctx, opts)
-	return res, initRes, err
+	return res, initRes, added, err
 }
 
 func cmdUninstall(args []string, stdout, stderr io.Writer) int {
@@ -124,7 +142,7 @@ func cmdUninstall(args []string, stdout, stderr io.Writer) int {
 	purge := fs.Bool("purge", false, "also delete the configuration, secrets and alert history")
 	yes := fs.Bool("yes", false, "with --purge: do not ask for confirmation")
 	asJSON := fs.Bool("json", false, "print JSON")
-	if fs.Parse(args) != nil {
+	if fs.Parse(reorderFlags(args)) != nil {
 		return exitUsage
 	}
 	if fs.NArg() != 0 || (*yes && !*purge) {

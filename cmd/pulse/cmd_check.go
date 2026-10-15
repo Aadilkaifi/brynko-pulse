@@ -27,17 +27,16 @@ import (
 
 var idRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
 
+const testDetails = `  pulse test channel <name>   sends a test alert through one channel
+  pulse test monitor <id>     runs one monitor once and shows what it measures`
+
 func cmdTest(args []string, stdout, stderr io.Writer) int {
-	p := platform.Current()
+	p := platformFor()
 	fs := newFlags("test", stderr)
 	cfgDir := fs.String("config", p.ConfigDir(), "configuration directory")
 	dataDir := fs.String("data", p.DataDir(), "where state and alert history are kept")
 	asJSON := fs.Bool("json", false, "print JSON")
-	fs.Usage = func() {
-		fmt.Fprintln(stderr, "Usage:\n  pulse test channel <name>   send a test alert\n  pulse test monitor <id>     run one monitor once and show what it measures")
-		fs.PrintDefaults()
-	}
-	if fs.Parse(args) != nil {
+	if fs.Parse(reorderFlags(args)) != nil {
 		return exitUsage
 	}
 	if fs.NArg() != 2 || (fs.Arg(0) != "channel" && fs.Arg(0) != "monitor") {
@@ -87,74 +86,97 @@ func testChannel(cfg *config.Config, id string, stdout, stderr io.Writer, asJSON
 	return exitOK
 }
 
+// monitorTest is what one check of a monitor found, as `pulse test` reports it.
+type monitorTest struct {
+	Monitor    string      `json:"monitor"`
+	Values     rule.Values `json:"values"`
+	Condition  string      `json:"condition"`
+	WouldAlert bool        `json:"would_alert"`
+	Detail     string      `json:"detail"`
+}
+
 func testMonitor(cfg *config.Config, id, dataDir string, p platform.Platform, stdout, stderr io.Writer, asJSON bool) int {
 	var m *config.Monitor
 	for i := range cfg.Monitors {
 		if cfg.Monitors[i].ID == id {
-			eff := cfg.Monitors[i].Effective(cfg.Defaults)
-			m = &eff
+			m = &cfg.Monitors[i]
 		}
 	}
 	if m == nil {
 		return fail(stdout, stderr, asJSON, "test", fmt.Errorf("there is no monitor with id %s", id))
 	}
-	chk, defaultAlert, err := monitor.New(*m, monitor.Deps{Platform: p, DataDir: dataDir,
-		OutputLimit: cfg.Limits.CommandOutputBytes, Started: time.Now()})
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	res, err := checkMonitor(ctx, cfg, *m, dataDir, p)
 	if err != nil {
 		return fail(stdout, stderr, asJSON, "test", err)
 	}
-	cond := m.AlertWhen
+	if asJSON {
+		return writeJSON(stdout, stderr, struct {
+			envelope
+			monitorTest
+		}{newEnvelope("test", nil), res})
+	}
+	printMonitorTest(stdout, res)
+	return exitOK
+}
+
+// checkMonitor runs one monitor once with the configuration's defaults applied.
+// An error means the monitor cannot be built; a failing check is a result.
+func checkMonitor(ctx context.Context, cfg *config.Config, m config.Monitor, dataDir string, p platform.Platform) (monitorTest, error) {
+	eff := m.Effective(cfg.Defaults)
+	chk, defaultAlert, err := monitor.New(eff, monitor.Deps{Platform: p, DataDir: dataDir,
+		OutputLimit: cfg.Limits.CommandOutputBytes, Started: time.Now()})
+	if err != nil {
+		return monitorTest{}, err
+	}
+	cond := eff.AlertWhen
 	if cond == "" {
 		cond = defaultAlert
 	}
 	alertC, err := rule.Parse(cond)
 	if err != nil {
-		return fail(stdout, stderr, asJSON, "test", err)
+		return monitorTest{}, err
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-	defer cancel()
 	values, err := chk.Check(ctx)
 	if errors.Is(err, monitor.ErrNotReady) { // measured between two samples, such as cpu
 		time.Sleep(time.Second)
 		values, err = chk.Check(ctx)
 	}
-	var wouldAlert bool
-	var detail string
-	if errors.Is(err, monitor.ErrNotReady) {
-		detail = "this monitor follows new events while pulse runs, so a one-off test has nothing to measure"
-	} else if err != nil {
-		wouldAlert, detail = true, "check failed: "+err.Error()
-	} else if wouldAlert, err = alertC.Eval(values); err != nil {
-		wouldAlert, detail = true, err.Error()
-	} else {
-		detail = alertC.Describe(values)
+	res := monitorTest{Monitor: eff.ID, Values: values, Condition: alertC.Raw}
+	if res.Values == nil {
+		res.Values = rule.Values{}
 	}
-	if asJSON {
-		return writeJSON(stdout, stderr, struct {
-			envelope
-			Monitor    string      `json:"monitor"`
-			Values     rule.Values `json:"values"`
-			Condition  string      `json:"condition"`
-			WouldAlert bool        `json:"would_alert"`
-			Detail     string      `json:"detail"`
-		}{newEnvelope("test", nil), id, values, alertC.Raw, wouldAlert, detail})
+	switch {
+	case errors.Is(err, monitor.ErrNotReady):
+		res.Detail = "this monitor follows new events while pulse runs, so a one-off test has nothing to measure"
+	case err != nil:
+		res.WouldAlert, res.Detail = true, "check failed: "+err.Error()
+	default:
+		if res.WouldAlert, err = alertC.Eval(values); err != nil {
+			res.WouldAlert, res.Detail = true, err.Error()
+		} else {
+			res.Detail = alertC.Describe(values)
+		}
 	}
-	for _, k := range rule.Names(values) {
-		fmt.Fprintf(stdout, "  %-22s %s\n", k, rule.Format(values[k]))
+	return res, nil
+}
+
+func printMonitorTest(w io.Writer, res monitorTest) {
+	for _, k := range rule.Names(res.Values) {
+		fmt.Fprintf(w, "  %-22s %s\n", k, rule.Format(res.Values[k]))
 	}
 	verdict := "not met, no alert"
-	if wouldAlert {
+	if res.WouldAlert {
 		verdict = "MET, this would alert"
 	}
-	fmt.Fprintf(stdout, "Alert rule: %s  ->  %s (%s)\n", alertC.Raw, verdict, detail)
-	return exitOK
+	fmt.Fprintf(w, "Alert rule: %s  ->  %s (%s)\n", res.Condition, verdict, res.Detail)
 }
 
 func cmdPing(args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("ping", stderr)
-	dataDir := fs.String("data", platform.Current().DataDir(), "where state and alert history are kept")
-	if fs.Parse(args) != nil {
+	dataDir := fs.String("data", platformFor().DataDir(), "where state and alert history are kept")
+	if fs.Parse(reorderFlags(args)) != nil {
 		return exitUsage
 	}
 	if fs.NArg() != 1 || !idRe.MatchString(fs.Arg(0)) {

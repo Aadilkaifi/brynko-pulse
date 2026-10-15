@@ -12,17 +12,16 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/Aadilkaifi/brynko-pulse/internal/platform"
 	"github.com/Aadilkaifi/brynko-pulse/internal/runner"
 	"github.com/Aadilkaifi/brynko-pulse/internal/version"
 )
 
 func cmdRun(args []string, stdout, stderr io.Writer) int {
-	p := platform.Current()
+	p := platformFor()
 	fs := newFlags("run", stderr)
 	cfgDir := fs.String("config", p.ConfigDir(), "configuration directory")
 	dataDir := fs.String("data", p.DataDir(), "where state and alert history are kept")
-	if fs.Parse(args) != nil {
+	if fs.Parse(reorderFlags(args)) != nil {
 		return exitUsage
 	}
 

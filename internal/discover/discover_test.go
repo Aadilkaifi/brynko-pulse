@@ -13,25 +13,30 @@ import (
 
 func TestSuggest(t *testing.T) {
 	cfg := &config.Config{Monitors: []config.Monitor{
-		{ID: "root-disk", Type: "disk"}, {ID: "web", Type: "service", Service: "nginx"}, {ID: "pg", Type: "port", Port: 5432},
+		{ID: "root-disk", Type: "disk"}, {ID: "web", Type: "service", Service: "nginx"}, {ID: "https", Type: "port", Port: 443},
 	}}
 	inv := host.Inventory{Services: []string{"nginx", "redis-server"},
-		Ports: []host.ListenPort{{Address: "0.0.0.0", Port: 80}, {Address: "127.0.0.1", Port: 5432}, {Address: "10.0.0.5", Port: 9000}, {Address: "fe80::1", Port: 7000}}}
-	got := Suggest(inv, []string{"api"}, cfg, "/")
+		Ports: []host.ListenPort{{Address: "0.0.0.0", Port: 80}, {Address: "::", Port: 443}, {Address: "127.0.0.1", Port: 3306},
+			{Address: "0.0.0.0", Port: 22}, {Address: "0.0.0.0", Port: 5433}}}
+	got, notes := Suggest(inv, []string{"api"}, cfg, "/")
 	ids := []string{}
 	for _, s := range got {
 		ids = append(ids, s.ID)
 	}
-	want := "memory cpu service-redis-server container-api port-80 port-9000 port-7000"
-	if strings.Join(ids, " ") != want {
+	if want := "memory cpu service-redis-server container-api port-80"; strings.Join(ids, " ") != want {
 		t.Fatalf("got %v\nwant %s", ids, want)
 	}
-	for _, s := range got {
-		if s.ID == "port-9000" && !strings.Contains(s.YAML, "host: 10.0.0.5") {
-			t.Errorf("a port bound to one address must be checked there:\n%s", s.YAML)
-		}
-		if s.ID == "port-7000" && !strings.Contains(s.YAML, "host: fe80::1") {
-			t.Errorf("ipv6:\n%s", s.YAML)
+	if len(notes) != 1 || !strings.Contains(notes[0], "pulse add port") {
+		t.Fatalf("other ports must be explained, not checked: %v", notes)
+	}
+}
+
+func TestPortTarget(t *testing.T) {
+	for in, want := range map[host.ListenPort]string{
+		{Address: "0.0.0.0", Port: 80}: "80", {Address: "10.0.0.5", Port: 443}: "10.0.0.5:443", {Address: "fe80::1", Port: 443}: "[fe80::1]:443",
+	} {
+		if got := portTarget(in); got != want {
+			t.Errorf("portTarget(%v) = %s, want %s", in, got, want)
 		}
 	}
 }
