@@ -37,8 +37,9 @@ monitors: []
 #  - id: app-errors                   # errors pile up in a log
 #    type: log
 #    source: { file: /var/log/myapp/error.log }
-#    pattern: "ERROR|FATAL"
-#    alert_when: matches_per_minute > 20
+#    pattern: "ERROR|FATAL"        # a regular expression
+#    window: 1m                     # count matching lines over the last minute
+#    alert_when: matches > 20       # journal: source: { journal: nginx }; Windows: { eventlog: Application }
 #
 #  - id: backup-file                  # a file stops being updated
 #    type: file

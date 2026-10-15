@@ -17,8 +17,11 @@ func TestInitCreatesValidConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Created) != 4 {
-		t.Fatalf("created %v, want 4 files", res.Created)
+	if len(res.Created) != 5 {
+		t.Fatalf("created %v, want 5 files", res.Created)
+	}
+	if fi, err := os.Stat(SecretsPath(dir)); err != nil || fi.Mode().Perm()&0o007 != 0 {
+		t.Fatalf("secrets.env must exist and be private: %v", err)
 	}
 	got := Validate(dir)
 	if !got.OK() {
@@ -74,7 +77,7 @@ func TestSanitizeServerName(t *testing.T) {
 // or first-time users copy broken config.
 func TestCommentedExamplesAreValid(t *testing.T) {
 	for _, v := range []string{"PULSE_SMTP_PASSWORD", "PULSE_TELEGRAM_TOKEN", "PULSE_SLACK_WEBHOOK",
-		"PULSE_WHATSAPP_TOKEN", "PULSE_WEBHOOK_SECRET"} {
+		"PULSE_WHATSAPP_TOKEN", "PULSE_WEBHOOK_SECRET", "PULSE_BRYNKO_KEY"} {
 		t.Setenv(v, "x")
 	}
 	src := filepath.Join("..", "..", "examples")
@@ -97,6 +100,11 @@ func TestCommentedExamplesAreValid(t *testing.T) {
 		return strings.Join(out, "\n")
 	}
 	pulse := strings.Replace(read(PulseFile), "# notify: [ops-email]", "notify: [ops-email]", 1)
+	pulse = strings.Replace(pulse, "  # flapping:", "  flapping:", 1)
+	pulse = strings.ReplaceAll(pulse, "  #   ", "    ")
+	if i := strings.Index(pulse, "# maintenance:"); i >= 0 {
+		pulse = pulse[:i] + uncomment(pulse[i:], "# maintenance:", "maintenance:")
+	}
 	dir := writeConfig(t, map[string]string{
 		PulseFile:                     pulse,
 		ChannelsFile:                  uncomment(read(ChannelsFile), "channels: {}", "channels:"),

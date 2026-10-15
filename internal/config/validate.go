@@ -5,14 +5,15 @@ package config
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/santhosh-tekuri/jsonschema/v6/kind"
@@ -42,15 +43,78 @@ func (r Result) OK() bool { return len(r.Errors) == 0 }
 
 // Validate checks every file in dir against the schema and against each other.
 func Validate(dir string) Result {
+	r, _, _ := validate(dir, dirSource(dir))
+	return r
+}
+
+// Load validates dir and returns the merged configuration. cfg is nil when the
+// result has errors.
+func Load(dir string) (*Config, Result) {
+	r, docs, secrets := validate(dir, dirSource(dir))
+	if !r.OK() {
+		return nil, r
+	}
+	cfg, err := merge(docs)
+	if err != nil {
+		r.Errors = append(r.Errors, Issue{Message: "cannot read the configuration: " + err.Error()})
+		return nil, r
+	}
+	cfg.Secrets = secrets
+	return cfg, r
+}
+
+func merge(docs []document) (*Config, error) {
+	cfg := &Config{Channels: map[string]Channel{}}
+	for _, d := range docs {
+		raw, err := json.Marshal(d.value)
+		if err != nil {
+			return nil, err
+		}
+		switch d.kind {
+		case kindPulse:
+			if err := json.Unmarshal(raw, cfg); err != nil {
+				return nil, fmt.Errorf("%s: %w", d.name, err)
+			}
+		case kindChannels:
+			var f struct{ Channels map[string]Channel }
+			if err := json.Unmarshal(raw, &f); err != nil {
+				return nil, fmt.Errorf("%s: %w", d.name, err)
+			}
+			for id, ch := range f.Channels {
+				cfg.Channels[id] = ch
+			}
+		case kindMonitors:
+			var f struct{ Monitors []Monitor }
+			if err := json.Unmarshal(raw, &f); err != nil {
+				return nil, fmt.Errorf("%s: %w", d.name, err)
+			}
+			for _, m := range f.Monitors {
+				m.SourceFile = d.name
+				cfg.Monitors = append(cfg.Monitors, m)
+			}
+		}
+	}
+	if cfg.Limits.MaxAlertsPerMinute == 0 {
+		cfg.Limits.MaxAlertsPerMinute = 10
+	}
+	if cfg.Limits.CommandOutputBytes == 0 {
+		cfg.Limits.CommandOutputBytes = 64 << 10
+	}
+	return cfg, nil
+}
+
+func validate(dir string, src source) (Result, []document, Secrets) {
 	r := Result{Dir: dir, Errors: []Issue{}, Warnings: []Issue{}}
 
-	docs, issues := load(dir)
+	docs, issues := load(src)
+	r.Errors = append(r.Errors, issues...)
+	secrets, issues := readSecrets(src)
 	r.Errors = append(r.Errors, issues...)
 
 	s, err := compiled()
 	if err != nil {
 		r.Errors = append(r.Errors, Issue{Message: "the built-in schema is broken: " + err.Error()})
-		return r
+		return r, nil, nil
 	}
 	for _, d := range docs {
 		if err := s.byKind[d.kind].Validate(d.value); err != nil {
@@ -58,11 +122,11 @@ func Validate(dir string) Result {
 		}
 	}
 	if r.OK() {
-		crossCheck(docs, &r)
+		crossCheck(docs, secrets, &r)
 	}
 	sortIssues(r.Errors)
 	sortIssues(r.Warnings)
-	return r
+	return r, docs, secrets
 }
 
 type compiledSchema struct {
@@ -226,11 +290,14 @@ func pointer(loc []string) string {
 	return "/" + strings.Join(parts, "/")
 }
 
+// reservedID names every monitor at once, as in "pulse silence all".
+const reservedID = "all"
+
 var envRef = regexp.MustCompile(`^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$`)
 
 // crossCheck finds problems that span files. It runs only when every file
 // matches the schema, so type assertions below are safe.
-func crossCheck(docs []document, r *Result) {
+func crossCheck(docs []document, secrets Secrets, r *Result) {
 	channels := map[string]bool{}
 	var defaultNotify []any
 	var pulseDoc document
@@ -267,6 +334,10 @@ func crossCheck(docs []document, r *Result) {
 			mon := item.(map[string]any)
 			id := mon["id"].(string)
 			base := []string{"monitors", fmt.Sprint(i)}
+			if id == reservedID {
+				r.Errors = append(r.Errors, issueAt(d, append(base, "id"),
+					`monitor id "all" is reserved: "pulse silence all" means every monitor. Pick another id`))
+			}
 			if first, dup := monitorIDs[id]; dup {
 				r.Errors = append(r.Errors, issueAt(d, append(base, "id"),
 					fmt.Sprintf("monitor id %q is already used in %s", id, first)))
@@ -294,15 +365,17 @@ func crossCheck(docs []document, r *Result) {
 		r.Warnings = append(r.Warnings, Issue{File: MonitorsDir, Message: "no monitors are configured yet"})
 	}
 
+	checkMaintenance(pulseDoc, monitorIDs, r)
+
 	for _, d := range docs {
 		walkStrings(d.value, nil, func(path []string, s string) {
 			m := envRef.FindStringSubmatch(s)
 			if m == nil {
 				return
 			}
-			if _, set := os.LookupEnv(m[1]); !set {
+			if _, set := secrets.Lookup(m[1]); !set {
 				r.Warnings = append(r.Warnings, issueAt(d, path,
-					fmt.Sprintf("%s is not set in this environment. Make sure the pulse service has it.", m[1])))
+					fmt.Sprintf("%s is not set. Add it to %s in the config folder.", m[1], SecretsFile)))
 			}
 		})
 	}
@@ -339,4 +412,39 @@ func sortIssues(s []Issue) {
 		}
 		return s[i].Line < s[j].Line
 	})
+}
+
+// checkMaintenance finds what the schema cannot: unknown time zones, empty
+// windows, repeated names and monitors that do not exist.
+func checkMaintenance(d document, monitorIDs map[string]string, r *Result) {
+	if d.value == nil {
+		return
+	}
+	list, _ := d.value.(map[string]any)["maintenance"].([]any)
+	names := map[string]bool{}
+	for i, item := range list {
+		w := item.(map[string]any)
+		base := []string{"maintenance", fmt.Sprint(i)}
+		name, _ := w["name"].(string)
+		if names[name] {
+			r.Errors = append(r.Errors, issueAt(d, append(base, "name"), fmt.Sprintf("maintenance window %q is defined twice", name)))
+		}
+		names[name] = true
+		if w["from"] == w["to"] {
+			r.Errors = append(r.Errors, issueAt(d, append(base, "to"), "from and to are the same time, so the window would never open"))
+		}
+		if tz, ok := w["timezone"].(string); ok {
+			if _, err := time.LoadLocation(tz); err != nil {
+				r.Errors = append(r.Errors, issueAt(d, append(base, "timezone"),
+					fmt.Sprintf("%q is not a known time zone; use a name like Asia/Kolkata or UTC", tz)))
+			}
+		}
+		ids, _ := w["monitors"].([]any)
+		for j, id := range ids {
+			if _, ok := monitorIDs[id.(string)]; !ok {
+				r.Errors = append(r.Errors, issueAt(d, append(base, "monitors", fmt.Sprint(j)),
+					fmt.Sprintf("there is no monitor with id %q", id)))
+			}
+		}
+	}
 }

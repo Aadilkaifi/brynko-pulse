@@ -85,7 +85,7 @@ func Init(opts InitOptions) (InitResult, error) {
 func starterFiles(opts InitOptions) (map[string][]byte, error) {
 	out := map[string][]byte{}
 	err := fs.WalkDir(examples.FS, ".", func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() || path.Ext(p) != ".yaml" {
+		if err != nil || d.IsDir() || (path.Ext(p) != ".yaml" && p != SecretsFile) {
 			return err
 		}
 		data, err := examples.FS.ReadFile(p)

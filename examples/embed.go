@@ -7,7 +7,7 @@ package examples
 
 import "embed"
 
-// FS contains pulse.yaml, channels.yaml and monitors/*.yaml.
+// FS contains pulse.yaml, channels.yaml, secrets.env and monitors/*.yaml.
 //
-//go:embed pulse.yaml channels.yaml monitors/*.yaml
+//go:embed pulse.yaml channels.yaml secrets.env monitors/*.yaml
 var FS embed.FS

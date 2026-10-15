@@ -99,3 +99,41 @@ func TestInit(t *testing.T) {
 		t.Fatalf("json init on existing dir: exit %d, %s", code, out)
 	}
 }
+
+func TestStatusAndHistoryWithoutState(t *testing.T) {
+	dir := t.TempDir()
+	if code, _, errOut := runCmd("status", "--data", dir); code != exitInvalid || !strings.Contains(errOut, "has not run") {
+		t.Fatalf("status: exit %d, %q", code, errOut)
+	}
+	code, out, _ := runCmd("history", "--json", "--data", dir)
+	if code != exitOK || !strings.Contains(out, `"alerts": []`) {
+		t.Fatalf("history: exit %d, %s", code, out)
+	}
+}
+
+func TestPing(t *testing.T) {
+	dir := t.TempDir()
+	if code, _, _ := runCmd("ping", "--data", dir, "nightly-job"); code != exitOK {
+		t.Fatalf("exit %d", code)
+	}
+	if code, _, _ := runCmd("ping", "--data", dir, "../escape"); code != exitUsage {
+		t.Fatal("ping must refuse ids that are not plain names")
+	}
+}
+
+func TestTestMonitorAndChannel(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "cfg")
+	if code, _, errOut := runCmd("init", "--config", dir, "--server-name", "box"); code != exitOK {
+		t.Fatalf("init: %s", errOut)
+	}
+	code, out, errOut := runCmd("test", "--config", dir, "--data", t.TempDir(), "--json", "monitor", "memory")
+	if code != exitOK || !strings.Contains(out, `"would_alert"`) || !strings.Contains(out, "used_percent") {
+		t.Fatalf("test monitor: exit %d\n%s\n%s", code, out, errOut)
+	}
+	if code, _, errOut := runCmd("test", "--config", dir, "channel", "nope"); code != exitInvalid || !strings.Contains(errOut, "no channel named nope") {
+		t.Fatalf("test channel: exit %d, %q", code, errOut)
+	}
+	if code, _, _ := runCmd("test", "--config", dir, "nonsense", "x"); code != exitUsage {
+		t.Fatal("bad test target should be a usage error")
+	}
+}

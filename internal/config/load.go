@@ -10,8 +10,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -51,12 +49,12 @@ type lineError struct {
 
 func (e *lineError) Error() string { return e.msg }
 
-func load(dir string) ([]document, []Issue) {
+func load(src source) ([]document, []Issue) {
 	var docs []document
 	var issues []Issue
 
 	add := func(rel string, kind fileKind, required bool) {
-		d, err := readDocument(filepath.Join(dir, filepath.FromSlash(rel)), rel, kind)
+		d, err := readDocument(src, rel, kind)
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
 			if required {
@@ -72,13 +70,12 @@ func load(dir string) ([]document, []Issue) {
 	add(PulseFile, kindPulse, true)
 	add(ChannelsFile, kindChannels, false)
 
-	entries, err := os.ReadDir(filepath.Join(dir, MonitorsDir))
+	names, err := src.files(MonitorsDir)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		issues = append(issues, Issue{File: MonitorsDir, Message: "cannot read the monitors folder: " + err.Error()})
 	}
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !(strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml")) {
+	for _, name := range names {
+		if !(strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml")) {
 			continue
 		}
 		add(MonitorsDir+"/"+name, kindMonitors, true)
@@ -86,8 +83,8 @@ func load(dir string) ([]document, []Issue) {
 	return docs, issues
 }
 
-func readDocument(path, rel string, kind fileKind) (document, error) {
-	f, err := os.Open(path)
+func readDocument(src source, rel string, kind fileKind) (document, error) {
+	f, err := src.open(rel)
 	if err != nil {
 		return document{}, err
 	}

@@ -5,18 +5,13 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
+	_ "time/tzdata" // the same time zones on every system, for maintenance windows
 
-	"github.com/Aadilkaifi/brynko-pulse/internal/config"
 	"github.com/Aadilkaifi/brynko-pulse/internal/output"
-	"github.com/Aadilkaifi/brynko-pulse/internal/platform"
-	"github.com/Aadilkaifi/brynko-pulse/internal/version"
-	"github.com/Aadilkaifi/brynko-pulse/schema"
 )
 
 const (
@@ -29,28 +24,39 @@ func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
+var commands = map[string]func(args []string, stdout, stderr io.Writer) int{
+	"init":      cmdInit,
+	"validate":  cmdValidate,
+	"run":       cmdRun,
+	"status":    cmdStatus,
+	"history":   cmdHistory,
+	"test":      cmdTest,
+	"ping":      cmdPing,
+	"silence":   cmdSilence,
+	"add":       cmdAdd,
+	"discover":  cmdDiscover,
+	"install":   cmdInstall,
+	"uninstall": cmdUninstall,
+	"schema":    cmdSchema,
+	"version":   cmdVersion,
+}
+
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		usage(stderr)
 		return exitUsage
 	}
-	switch args[0] {
-	case "version":
-		return cmdVersion(args[1:], stdout, stderr)
-	case "schema":
-		return cmdSchema(args[1:], stdout, stderr)
-	case "init":
-		return cmdInit(args[1:], stdout, stderr)
-	case "validate":
-		return cmdValidate(args[1:], stdout, stderr)
-	case "help", "-h", "--help":
+	if args[0] == "help" || args[0] == "-h" || args[0] == "--help" {
 		usage(stdout)
 		return exitOK
-	default:
+	}
+	cmd, ok := commands[args[0]]
+	if !ok {
 		fmt.Fprintf(stderr, "Unknown command %q.\n\n", args[0])
 		usage(stderr)
 		return exitUsage
 	}
+	return cmd(args[1:], stdout, stderr)
 }
 
 func usage(w io.Writer) {
@@ -59,9 +65,23 @@ func usage(w io.Writer) {
 Usage:
   pulse <command> [flags]
 
-Commands:
+Set up:
   init       Create the configuration folder with a starter setup
   validate   Check the configuration and explain any problems
+  discover   Find services, containers and ports to monitor, and suggest monitors
+  add        Add a monitor with one command, for example: pulse add disk /data --above 85
+  test       Send a test alert, or run one monitor once
+
+Run:
+  install    Run pulse as a background service that starts at boot
+  uninstall  Stop and remove the service (keeps the configuration)
+  run        Start monitoring in this terminal (runs until stopped)
+  status     Show every monitor and channel right now
+  history    Show recent alerts
+  silence    Pause alerts for a while, for example during a deploy
+  ping       Record a heartbeat, for jobs that check in
+
+Other:
   schema     Print the JSON Schema for the configuration files
   version    Show the version
 
@@ -75,155 +95,36 @@ func newFlags(name string, stderr io.Writer) *flag.FlagSet {
 	return fs
 }
 
-func cmdVersion(args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("version", stderr)
-	asJSON := fs.Bool("json", false, "print JSON")
-	if fs.Parse(args) != nil {
-		return exitUsage
-	}
-	info := version.Get()
-	if *asJSON {
-		return writeJSON(stdout, stderr, struct {
-			APIVersion int `json:"api_version"`
-			version.Info
-			ConfigVersion int `json:"config_version"`
-		}{output.APIVersion, info, schema.Version})
-	}
-	fmt.Fprintf(stdout, "pulse %s (%s, %s/%s)\n", info.Version, info.Go, info.OS, info.Arch)
-	return exitOK
+// envelope is the start of every --json answer.
+type envelope struct {
+	APIVersion int    `json:"api_version"`
+	Command    string `json:"command"`
+	OK         bool   `json:"ok"`
+	Error      string `json:"error,omitempty"`
 }
 
-func cmdSchema(args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("schema", stderr)
-	if fs.Parse(args) != nil {
-		return exitUsage
-	}
-	if _, err := stdout.Write(schema.JSON); err != nil {
-		fmt.Fprintln(stderr, err)
-		return exitInvalid
-	}
-	return exitOK
-}
-
-func cmdInit(args []string, stdout, stderr io.Writer) int {
-	host, _ := os.Hostname()
-	p := platform.Current()
-	fs := newFlags("init", stderr)
-	dir := fs.String("config", p.ConfigDir(), "configuration directory to create")
-	name := fs.String("server-name", host, "name shown in alerts (defaults to this machine's host name)")
-	asJSON := fs.Bool("json", false, "print JSON")
-	if fs.Parse(args) != nil {
-		return exitUsage
-	}
-
-	res, err := config.Init(config.InitOptions{Dir: *dir, ServerName: *name, RootDisk: p.RootDisk()})
-	if *asJSON {
-		out := struct {
-			APIVersion int    `json:"api_version"`
-			Command    string `json:"command"`
-			OK         bool   `json:"ok"`
-			Error      string `json:"error,omitempty"`
-			config.InitResult
-		}{output.APIVersion, "init", err == nil, "", res}
-		if err != nil {
-			out.Error = initErrorMessage(*dir, err)
-		}
-		if c := writeJSON(stdout, stderr, out); c != exitOK {
-			return c
-		}
-		if err != nil {
-			return exitInvalid
-		}
-		return exitOK
-	}
-
+func newEnvelope(command string, err error) envelope {
+	e := envelope{APIVersion: output.APIVersion, Command: command, OK: err == nil}
 	if err != nil {
-		fmt.Fprintln(stderr, initErrorMessage(*dir, err))
-		return exitInvalid
+		e.Error = err.Error()
 	}
-	fmt.Fprintf(stdout, "Created %s\n", res.Dir)
-	for _, f := range res.Created {
-		fmt.Fprintf(stdout, "  %s\n", f)
-	}
-	fmt.Fprint(stdout, `
-Next:
-  1. Open channels.yaml and add where alerts should go (email, Telegram, Slack...).
-  2. Add that channel's name to "notify" in pulse.yaml.
-  3. Run: pulse validate
-`)
-	return exitOK
-}
-
-func initErrorMessage(dir string, err error) string {
-	var exists *config.ExistsError
-	switch {
-	case errors.As(err, &exists):
-		return fmt.Sprintf("pulse is already set up in %s (%s). Nothing was changed. Edit those files, then run pulse validate.", dir, exists.Error())
-	case errors.Is(err, fs.ErrPermission):
-		return fmt.Sprintf("Cannot write to %s: permission denied. Run as root or Administrator, or choose another folder with --config.", dir)
-	default:
-		return fmt.Sprintf("Could not create the configuration in %s: %v", dir, err)
-	}
-}
-
-func cmdValidate(args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("validate", stderr)
-	dir := fs.String("config", platform.Current().ConfigDir(), "configuration directory")
-	asJSON := fs.Bool("json", false, "print JSON")
-	if fs.Parse(args) != nil {
-		return exitUsage
-	}
-
-	res := config.Validate(*dir)
-	code := exitOK
-	if !res.OK() {
-		code = exitInvalid
-	}
-
-	if *asJSON {
-		if c := writeJSON(stdout, stderr, struct {
-			APIVersion int    `json:"api_version"`
-			Command    string `json:"command"`
-			OK         bool   `json:"ok"`
-			config.Result
-		}{output.APIVersion, "validate", res.OK(), res}); c != exitOK {
-			return c
-		}
-		return code
-	}
-
-	fmt.Fprintf(stdout, "Checked %s\n", res.Dir)
-	for _, is := range res.Errors {
-		fmt.Fprintf(stdout, "error    %s\n", formatIssue(is))
-	}
-	for _, is := range res.Warnings {
-		fmt.Fprintf(stdout, "warning  %s\n", formatIssue(is))
-	}
-	switch {
-	case !res.OK():
-		fmt.Fprintf(stdout, "The configuration has %d error(s). Fix them and run pulse validate again.\n", len(res.Errors))
-	case len(res.Warnings) > 0:
-		fmt.Fprintf(stdout, "The configuration is valid, with %d warning(s).\n", len(res.Warnings))
-	default:
-		fmt.Fprintln(stdout, "The configuration is valid.")
-	}
-	return code
-}
-
-func formatIssue(is config.Issue) string {
-	loc := is.File
-	if is.Line > 0 {
-		loc = fmt.Sprintf("%s:%d", loc, is.Line)
-	}
-	if loc == "" {
-		return is.Message
-	}
-	return loc + "  " + is.Message
+	return e
 }
 
 func writeJSON(stdout, stderr io.Writer, v any) int {
 	if err := output.JSON(stdout, v); err != nil {
 		fmt.Fprintln(stderr, err)
+		return exitInvalid
+	}
+	return exitOK
+}
+
+// finishJSON writes v and returns the exit code that matches err.
+func finishJSON(stdout, stderr io.Writer, v any, err error) int {
+	if c := writeJSON(stdout, stderr, v); c != exitOK {
+		return c
+	}
+	if err != nil {
 		return exitInvalid
 	}
 	return exitOK

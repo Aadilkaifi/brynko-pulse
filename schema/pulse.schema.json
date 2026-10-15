@@ -10,6 +10,7 @@
     "defaults": { "$ref": "#/$defs/defaults" },
     "limits": { "$ref": "#/$defs/limits" },
     "api": { "$ref": "#/$defs/api" },
+    "maintenance": { "$ref": "#/$defs/maintenanceList" },
     "channels": { "$ref": "#/$defs/channelMap" },
     "monitors": { "$ref": "#/$defs/monitorList" }
   },
@@ -25,7 +26,8 @@
         "server_name": { "$ref": "#/$defs/serverName" },
         "defaults": { "$ref": "#/$defs/defaults" },
         "limits": { "$ref": "#/$defs/limits" },
-        "api": { "$ref": "#/$defs/api" }
+        "api": { "$ref": "#/$defs/api" },
+        "maintenance": { "$ref": "#/$defs/maintenanceList" }
       },
       "required": ["version", "server_name"],
       "additionalProperties": false
@@ -98,9 +100,48 @@
         "notify": { "$ref": "#/$defs/notifyList" },
         "for": { "$ref": "#/$defs/duration" },
         "cooldown": { "$ref": "#/$defs/duration", "default": "15m" },
-        "interval": { "$ref": "#/$defs/duration", "default": "30s" }
+        "interval": { "$ref": "#/$defs/duration", "default": "30s" },
+        "flapping": { "$ref": "#/$defs/flapping" }
       },
       "additionalProperties": false
+    },
+    "flapping": {
+      "description": "A monitor that changes state this many times within the window is marked flapping and sends one alert instead of many.",
+      "type": "object",
+      "properties": {
+        "changes": { "type": "integer", "minimum": 0, "maximum": 100, "default": 5, "description": "0 turns flapping detection off." },
+        "window": { "$ref": "#/$defs/duration", "default": "30m" }
+      },
+      "additionalProperties": false
+    },
+    "maintenanceList": {
+      "description": "Weekly windows during which alerts are held back, as with pulse silence.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/maintenance" }
+    },
+    "maintenance": {
+      "type": "object",
+      "properties": {
+        "name": { "$ref": "#/$defs/id" },
+        "days": {
+          "description": "Days the window starts on.",
+          "type": "array",
+          "items": { "enum": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "from": { "$ref": "#/$defs/clock" },
+        "to": { "$ref": "#/$defs/clock" },
+        "timezone": { "description": "An IANA time zone such as Asia/Kolkata. Default: the server's local time.", "type": "string", "minLength": 1 },
+        "monitors": { "description": "Monitor ids the window applies to. Default: every monitor.", "type": "array", "items": { "$ref": "#/$defs/id" }, "minItems": 1, "uniqueItems": true }
+      },
+      "required": ["name", "days", "from", "to"],
+      "additionalProperties": false
+    },
+    "clock": {
+      "description": "A time of day as HH:MM, 24-hour, for example 02:30.",
+      "type": "string",
+      "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"
     },
     "limits": {
       "type": "object",
@@ -158,6 +199,7 @@
               "phone_number_id": { "type": "string", "minLength": 1 },
               "access_token": { "$ref": "#/$defs/envRef" },
               "template": { "type": "string", "minLength": 1 },
+              "language": { "description": "The template's language code, for example en or en_US.", "type": "string", "pattern": "^[a-z]{2,3}(_[A-Z]{2})?$", "default": "en" },
               "to": { "$ref": "#/$defs/phoneList" }
             },
             "required": ["phone_number_id", "access_token", "template", "to"]
@@ -323,7 +365,8 @@
                 "maxProperties": 1,
                 "additionalProperties": false
               },
-              "pattern": { "type": "string", "minLength": 1 }
+              "pattern": { "type": "string", "minLength": 1, "description": "A regular expression; a line that contains a match counts." },
+              "window": { "$ref": "#/$defs/duration", "default": "1m", "description": "matches counts the lines that matched within this time." }
             },
             "required": ["source", "pattern"]
           }

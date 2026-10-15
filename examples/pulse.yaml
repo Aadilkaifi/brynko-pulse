@@ -23,7 +23,25 @@ defaults:
   # After an alert, wait this long before repeating it if the problem continues.
   cooldown: 15m
 
+  # A monitor that keeps switching between failing and fine is "flapping":
+  # pulse sends one alert about it instead of one per change. These are the
+  # defaults; set changes: 0 to turn it off.
+  # flapping:
+  #   changes: 5
+  #   window: 30m
+
 limits:
   # If more alerts than this fire in one minute, pulse sends one summary
   # instead of flooding you.
   max_alerts_per_minute: 10
+
+# Maintenance windows: every week at these times, alerts are held back, as
+# with pulse silence. If something is still failing when the window closes,
+# you get one alert. Remove the # in front of the lines to use it.
+# maintenance:
+#   - name: weekly-patching
+#     days: [sun]                 # mon tue wed thu fri sat sun
+#     from: "02:00"               # 24-hour clock; a window may run past midnight
+#     to: "03:00"
+#     timezone: Asia/Kolkata      # optional; default is the server's local time
+#     monitors: [cpu, memory]     # optional; default is every monitor

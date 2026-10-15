@@ -4,29 +4,70 @@
 package platform
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/Aadilkaifi/brynko-pulse/internal/platform/linux"
-	"github.com/Aadilkaifi/brynko-pulse/internal/platform/windows"
 )
 
-func TestPlatforms(t *testing.T) {
-	for _, p := range []Platform{Current(), linux.Platform{}, windows.Platform{}} {
-		if p.Name() == "" {
-			t.Errorf("%T: empty name", p)
+func TestCurrent(t *testing.T) {
+	p := Current()
+	if p.Name() == "" {
+		t.Fatal("empty name")
+	}
+	for _, dir := range []string{p.ConfigDir(), p.DataDir()} {
+		if !strings.Contains(dir, "brynko-pulse") {
+			t.Errorf("%q does not contain brynko-pulse", dir)
 		}
-		for _, dir := range []string{p.ConfigDir(), p.DataDir()} {
-			if !strings.Contains(dir, "brynko-pulse") {
-				t.Errorf("%s: %q does not contain brynko-pulse", p.Name(), dir)
-			}
-		}
+	}
+	if p.RootDisk() == "" {
+		t.Error("empty root disk")
 	}
 }
 
-func TestWindowsUsesProgramData(t *testing.T) {
-	t.Setenv("ProgramData", "D:\\Data")
-	if got := (windows.Platform{}).ConfigDir(); !strings.HasPrefix(got, "D:\\Data") {
-		t.Fatalf("ConfigDir = %q, want it under ProgramData", got)
+func TestSystemMetrics(t *testing.T) {
+	p := Current()
+	if p.Name() == "unsupported" {
+		t.Skip("no metrics on this OS")
+	}
+	d, err := p.DiskUsage(p.RootDisk())
+	if err != nil || d.TotalBytes == 0 || d.FreeBytes > d.TotalBytes {
+		t.Fatalf("DiskUsage = %+v, %v", d, err)
+	}
+	m, err := p.Memory()
+	if err != nil || m.TotalBytes == 0 || m.AvailableBytes > m.TotalBytes {
+		t.Fatalf("Memory = %+v, %v", m, err)
+	}
+	c, err := p.CPUTimes()
+	if err != nil || c.Total == 0 || c.Idle > c.Total {
+		t.Fatalf("CPUTimes = %+v, %v", c, err)
+	}
+	if _, err := p.ProcessCount("no-such-process-xyz"); err != nil {
+		t.Fatalf("ProcessCount: %v", err)
+	}
+}
+
+func TestConfigSecure(t *testing.T) {
+	p := Current()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "pulse.yaml"), []byte("x"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.SecureConfig(dir); err != nil {
+		t.Fatalf("SecureConfig: %v", err)
+	}
+	if err := os.Chmod(dir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.CheckConfigSecure(dir); err != nil {
+		t.Fatalf("a freshly secured folder should pass: %v", err)
+	}
+	if p.Name() == "linux" {
+		if err := os.Chmod(filepath.Join(dir, "pulse.yaml"), 0o666); err != nil {
+			t.Fatal(err)
+		}
+		if err := p.CheckConfigSecure(dir); err == nil {
+			t.Fatal("a world-writable file must be refused")
+		}
 	}
 }
