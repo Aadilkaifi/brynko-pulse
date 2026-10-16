@@ -57,6 +57,14 @@ func (Platform) Inventory(ctx context.Context) (host.Inventory, error) {
 		}
 	}
 	inv.Ports = dedupePorts(inv.Ports)
+	if f, err := os.Open("/proc/self/mounts"); err == nil {
+		for _, m := range parseMounts(f) {
+			if d, err := (Platform{}).DiskUsage(m.Path); err == nil && d.TotalBytes > 0 {
+				inv.Filesystems = append(inv.Filesystems, host.Filesystem{Path: m.Path, Type: m.Type, Device: m.Device, Disk: d})
+			}
+		}
+		f.Close()
+	}
 	return inv, nil
 }
 

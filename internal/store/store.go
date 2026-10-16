@@ -38,19 +38,20 @@ type MonitorStatus struct {
 	File     string         `json:"file,omitempty"`
 	Severity string         `json:"severity"`
 	Interval string         `json:"interval"`
+	Enabled  bool           `json:"enabled"`         // false: turned off with enabled: false, not checked
 	Error    string         `json:"error,omitempty"` // set when the monitor could not start
 	Values   map[string]any `json:"values,omitempty"`
 
-	SilencedUntil time.Time `json:"silenced_until,omitempty"`
+	SilencedUntil time.Time `json:"silenced_until,omitzero"`
 	SilenceReason string    `json:"silence_reason,omitempty"`
 }
 
 // ChannelStatus is the delivery health of one channel.
 type ChannelStatus struct {
 	Type        string    `json:"type"`
-	LastSent    time.Time `json:"last_sent,omitempty"`
+	LastSent    time.Time `json:"last_sent,omitzero"`
 	LastError   string    `json:"last_error,omitempty"`
-	LastErrorAt time.Time `json:"last_error_at,omitempty"`
+	LastErrorAt time.Time `json:"last_error_at,omitzero"`
 	Unavailable string    `json:"unavailable,omitempty"`
 }
 

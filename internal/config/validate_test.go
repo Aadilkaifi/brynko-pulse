@@ -91,6 +91,10 @@ func TestValidate(t *testing.T) {
 		{name: "wrong config version", files: base(map[string]string{PulseFile: strings.Replace(validPulse, "version: 1", "version: 2", 1)}), wantErr: "value must be 1"},
 		{name: "no monitors warns", files: base(map[string]string{"monitors/system.yaml": ""}), wantWarn: "no monitors are configured"},
 		{name: "unset env warns", files: base(map[string]string{ChannelsFile: strings.Replace(validChannels, "PULSE_TEST_PASSWORD", "PULSE_NOT_SET_ANYWHERE", 1)}), wantWarn: "PULSE_NOT_SET_ANYWHERE is not set"},
+		{name: "json_expect valid", files: base(map[string]string{"monitors/x.yaml": "monitors:\n  - id: api\n    type: http\n    url: https://api.example.com/health\n    json_path: data.status\n    json_expect: == ok\n"})},
+		{name: "json_expect needs json_path", files: base(map[string]string{"monitors/x.yaml": "monitors:\n  - id: api\n    type: http\n    url: https://a.example.com\n    json_expect: == ok\n"}), wantErr: "set json_path too"},
+		{name: "json_expect text with >", files: base(map[string]string{"monitors/x.yaml": "monitors:\n  - id: api\n    type: http\n    url: https://api.example.com/health\n    json_path: data.status\n    json_expect: \"> ok\"\n"}), wantErr: "only be compared with == or !="},
+		{name: "json_expect without comparison", files: base(map[string]string{"monitors/x.yaml": "monitors:\n  - id: api\n    type: http\n    url: https://api.example.com/health\n    json_path: data.status\n    json_expect: ok\n"}), wantErr: "as a comparison"},
 		{name: "no channels warns", files: base(map[string]string{PulseFile: "version: 1\nserver_name: web-1\n"}), wantWarn: "alerts go nowhere"},
 	}
 

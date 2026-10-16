@@ -161,8 +161,11 @@ func TestSMTPPlain(t *testing.T) {
 		t.Fatal(err)
 	}
 	msg := <-got
-	if !strings.Contains(msg, "Subject: CRITICAL on web-1: disk") || !strings.Contains(msg, "used_percent is 91") {
-		t.Fatalf("message:\n%s", msg)
+	for _, want := range []string{"Subject: [Critical] web-1: disk: used_percent is 91", "multipart/alternative",
+		"Content-Type: text/plain; charset=utf-8", "Content-Type: text/html; charset=utf-8", "CRITICAL on web-1"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("message misses %q:\n%s", want, msg)
+		}
 	}
 }
 

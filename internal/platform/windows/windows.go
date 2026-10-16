@@ -87,15 +87,51 @@ func (Platform) Memory() (host.Memory, error) {
 	if r, _, err := procGlobalMemoryStatusEx.Call(uintptr(unsafe.Pointer(&m))); r == 0 {
 		return host.Memory{}, fmt.Errorf("GlobalMemoryStatusEx: %w", err)
 	}
-	swapTotal, swapFree := uint64(0), uint64(0)
-	if m.TotalPageFile > m.TotalPhys {
-		swapTotal = m.TotalPageFile - m.TotalPhys
-		if m.AvailPageFile > m.AvailPhys {
-			swapFree = min(m.AvailPageFile-m.AvailPhys, swapTotal)
-		}
+	// Swap is the page files themselves. GlobalMemoryStatusEx's page-file figures are the commit limit
+	// and charge (memory plus page files), which reads as a full page file once commitments pass free
+	// memory; a server that cannot answer is treated as having no page file.
+	swapTotal, swapUsed, err := pageFiles()
+	if err != nil {
+		swapTotal, swapUsed = 0, 0
 	}
 	return host.Memory{TotalBytes: m.TotalPhys, AvailableBytes: m.AvailPhys,
-		SwapTotalBytes: swapTotal, SwapFreeBytes: swapFree}, nil
+		SwapTotalBytes: swapTotal, SwapFreeBytes: swapTotal - min(swapUsed, swapTotal)}, nil
+}
+
+// pageFileInfo is one SYSTEM_PAGEFILE_INFORMATION entry; sizes are in pages.
+type pageFileInfo struct {
+	NextEntryOffset uint32
+	TotalSize       uint32
+	TotalInUse      uint32
+	PeakUsage       uint32
+	Name            windows.NTUnicodeString
+}
+
+// pageFiles reports the size and use of every page file, as Task Manager and Win32_PageFileUsage do.
+func pageFiles() (total, used uint64, err error) {
+	buf := make([]byte, 1024)
+	var n uint32
+	for {
+		err = windows.NtQuerySystemInformation(windows.SystemPageFileInformation, unsafe.Pointer(&buf[0]), uint32(len(buf)), &n)
+		if err != windows.STATUS_INFO_LENGTH_MISMATCH || len(buf) >= 1<<16 {
+			break
+		}
+		buf = make([]byte, len(buf)*4)
+	}
+	if err != nil || n == 0 {
+		return 0, 0, err // n == 0: no page file
+	}
+	page := uint64(os.Getpagesize())
+	for off := uint32(0); int(off)+int(unsafe.Sizeof(pageFileInfo{})) <= len(buf); {
+		e := (*pageFileInfo)(unsafe.Pointer(&buf[off]))
+		total += uint64(e.TotalSize) * page
+		used += uint64(e.TotalInUse) * page
+		if e.NextEntryOffset == 0 {
+			break
+		}
+		off += e.NextEntryOffset
+	}
+	return total, used, nil
 }
 
 // CPUTimes uses GetSystemTimes; kernel time already includes idle time.
@@ -261,6 +297,16 @@ func setTreeACL(dir, sddl, skip string) error {
 	if err != nil {
 		return fmt.Errorf("set permissions on %s: %w", dir, err)
 	}
+	// Everything below keeps only what it inherits from dir. That takes an empty ACL: a nil one would
+	// be a NULL DACL, which gives everyone full control.
+	empty, err := windows.SecurityDescriptorFromString("D:")
+	if err != nil {
+		return err
+	}
+	inherit, _, err := empty.DACL()
+	if err != nil {
+		return err
+	}
 	return filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
 		if err != nil || p == dir {
 			return err
@@ -268,7 +314,10 @@ func setTreeACL(dir, sddl, skip string) error {
 		if skip != "" && d.IsDir() && strings.EqualFold(filepath.Clean(p), filepath.Clean(skip)) {
 			return filepath.SkipDir
 		}
-		return windows.SetNamedSecurityInfo(p, windows.SE_FILE_OBJECT,
-			windows.DACL_SECURITY_INFORMATION|windows.UNPROTECTED_DACL_SECURITY_INFORMATION, nil, nil, nil, nil)
+		if err := windows.SetNamedSecurityInfo(p, windows.SE_FILE_OBJECT,
+			windows.DACL_SECURITY_INFORMATION|windows.UNPROTECTED_DACL_SECURITY_INFORMATION, nil, nil, inherit, nil); err != nil {
+			return fmt.Errorf("set permissions on %s: %w", p, err)
+		}
+		return nil
 	})
 }

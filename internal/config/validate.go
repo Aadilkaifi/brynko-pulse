@@ -20,6 +20,7 @@ import (
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 
+	"github.com/Aadilkaifi/brynko-pulse/internal/rule"
 	"github.com/Aadilkaifi/brynko-pulse/schema"
 )
 
@@ -358,6 +359,14 @@ func crossCheck(docs []document, secrets Secrets, r *Result) {
 					fmt.Sprintf("monitor id %q is already used in %s", id, first)))
 			} else {
 				monitorIDs[id] = d.name
+			}
+			if s, set := mon["json_expect"].(string); set {
+				if _, path := mon["json_path"]; !path {
+					r.Errors = append(r.Errors, issueAt(d, append(base, "json_expect"),
+						"json_expect compares the JSON field that json_path names; set json_path too"))
+				} else if _, err := rule.ParseExpect(s); err != nil {
+					r.Errors = append(r.Errors, issueAt(d, append(base, "json_expect"), "json_expect: "+err.Error()))
+				}
 			}
 			notify, has := mon["notify"].([]any)
 			for j, ch := range notify {

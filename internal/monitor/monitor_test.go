@@ -108,6 +108,10 @@ func TestHTTP(t *testing.T) {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
+		if r.URL.Path == "/health" {
+			fmt.Fprint(w, `{"data": {"status": "degraded", "queue": 12}}`)
+			return
+		}
 		fmt.Fprint(w, "hello world")
 	}))
 	defer srv.Close()
@@ -123,6 +127,11 @@ func TestHTTP(t *testing.T) {
 		{"body matches", config.Monitor{URL: srv.URL, BodyContains: "world"}, true},
 		{"body missing", config.Monitor{URL: srv.URL, BodyContains: "absent"}, false},
 		{"unreachable", config.Monitor{URL: "http://127.0.0.1:1", Timeout: config.Duration(time.Second)}, false},
+		{"json read only", config.Monitor{URL: srv.URL + "/health", JSONPath: "data.status"}, true},
+		{"json as expected", config.Monitor{URL: srv.URL + "/health", JSONPath: "data.status", JSONExpect: "== degraded"}, true},
+		{"json not as expected", config.Monitor{URL: srv.URL + "/health", JSONPath: "data.status", JSONExpect: "== ok"}, false},
+		{"json number", config.Monitor{URL: srv.URL + "/health", JSONPath: "data.queue", JSONExpect: "< 100"}, true},
+		{"json field missing", config.Monitor{URL: srv.URL + "/health", JSONPath: "data.nope", JSONExpect: "!= x"}, false},
 	}
 	for _, tc := range tests {
 		c, err := newHTTP(tc.m)

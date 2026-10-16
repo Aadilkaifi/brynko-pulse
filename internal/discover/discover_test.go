@@ -23,8 +23,15 @@ func TestSuggest(t *testing.T) {
 	for _, s := range got {
 		ids = append(ids, s.ID)
 	}
-	if want := "memory cpu service-redis-server container-api port-80"; strings.Join(ids, " ") != want {
+	if want := "memory cpu swap service-redis-server container-api port-80"; strings.Join(ids, " ") != want {
 		t.Fatalf("got %v\nwant %s", ids, want)
+	}
+	// System monitors start active; what runs on the server is found but left for the user to turn on.
+	for _, s := range got {
+		off := strings.Contains(s.YAML, "enabled: false")
+		if system := s.Type == "memory" || s.Type == "cpu" || s.Type == "swap"; off == system {
+			t.Errorf("%s: enabled: false is %v, want %v\n%s", s.ID, off, !system, s.YAML)
+		}
 	}
 	if len(notes) != 1 || !strings.Contains(notes[0], "pulse add port") {
 		t.Fatalf("other ports must be explained, not checked: %v", notes)

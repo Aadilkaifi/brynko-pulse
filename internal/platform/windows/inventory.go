@@ -37,6 +37,7 @@ func (Platform) Inventory(ctx context.Context) (host.Inventory, error) {
 		inv.Ports = append(inv.Ports, listeningPorts(family)...)
 	}
 	inv.Ports = dedupe(inv.Ports)
+	inv.Filesystems = fixedDrives()
 	return inv, ctx.Err()
 }
 

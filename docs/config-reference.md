@@ -18,6 +18,7 @@ caught by `pulse validate` instead of being ignored.
 | `defaults` | [defaults](#defaults) |  |  |  |
 | `limits` | [limits](#limits) |  |  |  |
 | `maintenance` | list of [maintenance](#maintenance) windows |  |  |  |
+| `server_address` | string |  |  | How people reach this server, shown in alerts beside server_name, for example 203.0.113.10 or web-1.example.com. |
 
 ### defaults
 
@@ -123,7 +124,6 @@ Local API for tools and a future UI. Never listens on a network port.
 |---|---|---|---|---|
 | `api_key` | secret `${NAME}` | yes |  |  |
 | `email` | list of email addresses |  |  |  |
-| `sms` | list of phone numbers (+919876543210) |  |  |  |
 | `whatsapp` | list of phone numbers (+919876543210) |  |  |  |
 
 At least one of the delivery lists above is required.
@@ -137,14 +137,14 @@ Each file has a `monitors` list. Every monitor has:
 | `id` | id | yes |  | Unique name, used by status, history, silences and ping. |
 | `type` | `cpu` \| `memory` \| `load` \| `swap` \| `disk` \| `service` \| `container` \| `process` \| `port` \| `http` \| `ssl` \| `log` \| `file` \| `command` \| `heartbeat` | yes |  | What to watch; each type adds its own fields below. |
 | `alert_when` | condition (`metric > value`) |  |  | The comparison that means something is wrong. Some types have a default. |
-| `clear_when` | condition (`metric > value`) |  |  | When it counts as fixed again, to avoid alerts going on and off around a threshold. |
-| `cooldown` | duration (30s, 5m, 2h, 1d) |  |  | How often to repeat while it keeps failing. Default: defaults.cooldown. |
-| `enabled` | boolean |  | `true` | false keeps the monitor but stops checking it. |
-| `for` | duration (30s, 5m, 2h, 1d) |  |  | How long alert_when must hold before alerting. |
-| `interval` | duration (30s, 5m, 2h, 1d) |  |  | How often to check. Default: defaults.interval. |
-| `name` | string |  |  | Name shown in alerts. Default: the id. |
-| `notify` | list of channel names |  |  | Channels for this monitor. Default: defaults.notify. |
-| `severity` | `info` \| `warning` \| `critical` |  |  | Default: defaults.severity. |
+| `clear_when` | condition (`metric > value`) |  |  | When the problem counts as over, and pulse sends a resolved message. Set a lower level than the alert (alert above 85%, back to normal below 80%) so it does not flip back and forth around one value. Empty: as soon as alert_when is no longer true. |
+| `cooldown` | duration (30s, 5m, 2h, 1d) |  |  | While the problem lasts, the alert is sent again this often, until it is over. Empty: the server's default (defaults.cooldown). |
+| `enabled` | boolean |  | `true` | Off keeps the monitor in its file but stops checking it. |
+| `for` | duration (30s, 5m, 2h, 1d) |  |  | How long the problem must last before you are alerted, so a short spike does not wake anyone. Empty: the server's default (defaults.for), or at once when it sets none. |
+| `interval` | duration (30s, 5m, 2h, 1d) |  |  | How often pulse measures it. Types that follow events (containers, services, files, logs) also notice a change at once; this is the regular check in between. Empty: the server's default (defaults.interval). |
+| `name` | string |  |  | Shown in alerts and lists. Empty: the id. |
+| `notify` | list of channel names |  |  | Channels told about this monitor. Empty: the server's default channels (defaults.notify). |
+| `severity` | `info` \| `warning` \| `critical` |  |  | How serious an alert is. Empty: the server's default (defaults.severity). |
 
 ### Monitor type `cpu`
 
@@ -174,50 +174,52 @@ Requires `alert_when`.
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `path` | string | yes |  |  |
+| `path` | string | yes |  | A filesystem's mount point, or any path on it, for example / or /data (on Windows D:\). |
 
 ### Monitor type `service`
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `service` | string | yes |  |  |
+| `service` | string | yes |  | The service name, for example nginx: on Linux the systemd unit without .service, on Windows the service name. |
 
 ### Monitor type `container`
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `container` | string | yes |  |  |
+| `container` | string | yes |  | The container name, as docker ps shows it. |
 
 ### Monitor type `process`
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `match` | string | yes |  |  |
+| `match` | string | yes |  | The process name exactly as ps shows it, for example nginx. On Linux a process whose command line contains it also counts. |
 
 ### Monitor type `port`
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `port` | integer | yes |  |  |
-| `host` | string |  | `127.0.0.1` |  |
-| `timeout` | duration (30s, 5m, 2h, 1d) |  | `5s` |  |
+| `port` | integer | yes |  | The TCP port, for example 443. |
+| `host` | string |  | `127.0.0.1` | Where to connect. Empty: this server (127.0.0.1). |
+| `timeout` | duration (30s, 5m, 2h, 1d) |  | `5s` | Give up after this long. |
 
 ### Monitor type `http`
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `url` | string | yes |  | Must start with http:// or https://. |
-| `body_contains` | string |  |  |  |
-| `expect_status` | integer or list of integer |  |  |  |
-| `follow_redirects` | boolean |  | `true` |  |
-| `method` | `GET` \| `HEAD` \| `POST` |  | `GET` |  |
-| `timeout` | duration (30s, 5m, 2h, 1d) |  | `10s` |  |
+| `body_contains` | string |  |  | Text the answer must contain. pulse reads the answer as text (up to 1 MB) and looks for this exactly as written, capitals included, for example "status":"ok". |
+| `expect_status` | integer or list of integer |  |  | Status codes that count as up, for example 200, or 200 and 301. Empty: any 2xx or 3xx. |
+| `follow_redirects` | boolean |  | `true` | Follow redirects to the final page. |
+| `json_expect` | string |  |  | The value the JSON field must have, as a comparison: == ok, != error, > 0. When set, a different value counts as not answering as expected. Text is compared with == or != only; quote a number to compare it as text. |
+| `json_path` | string |  |  | For a JSON answer: the field to read, for example status, data.state or items.0.name (a number picks a list item). Alert on its value with json_value (a number or text), or on whether it is there with json_found. |
+| `method` | `GET` \| `HEAD` \| `POST` |  | `GET` | GET for pages and most APIs. |
+| `timeout` | duration (30s, 5m, 2h, 1d) |  | `10s` | Give up after this long. |
 
 ### Monitor type `ssl`
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `file` | string |  |  |  |
+| `file` | string |  |  | Or a certificate file on this server, for example /etc/ssl/certs/site.pem. |
 | `host` | string |  |  | A host name with an optional port, for example example.com:443. |
 
 Exactly one of `host`, `file`.
@@ -234,19 +236,19 @@ Exactly one of `host`, `file`.
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `path` | string | yes |  |  |
+| `path` | string | yes |  | The file to watch, for example /var/backups/db.sql.gz. |
 
 ### Monitor type `command`
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `run` | list of string | yes |  | The program and its arguments. Never run through a shell. |
-| `parse` | `exit_code` \| `text` \| `number` |  | `exit_code` |  |
-| `timeout` | duration (30s, 5m, 2h, 1d) |  | `30s` |  |
+| `parse` | `exit_code` \| `text` \| `number` |  | `exit_code` | What to read: only the exit code, the output as text, or the output as a number (it must start with one). |
+| `timeout` | duration (30s, 5m, 2h, 1d) |  | `30s` | Give up after this long. |
 
 ### Monitor type `heartbeat`
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `expect_every` | duration (30s, 5m, 2h, 1d) | yes |  |  |
-| `grace` | duration (30s, 5m, 2h, 1d) |  | `1m` |  |
+| `expect_every` | duration (30s, 5m, 2h, 1d) | yes |  | How often the job runs, for example 1d for a nightly job. |
+| `grace` | duration (30s, 5m, 2h, 1d) |  | `1m` | Extra time allowed before it counts as late. |

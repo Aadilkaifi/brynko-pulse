@@ -12,32 +12,34 @@ import (
 
 // Config is the validated, merged configuration.
 type Config struct {
-	Version     int                `json:"version"`
-	ServerName  string             `json:"server_name"`
-	Defaults    Defaults           `json:"defaults"`
-	Limits      Limits             `json:"limits"`
-	API         API                `json:"api"`
-	Channels    map[string]Channel `json:"channels"`
-	Monitors    []Monitor          `json:"monitors"`
-	Maintenance []Maintenance      `json:"maintenance"`
+	Version    int    `json:"version"`
+	ServerName string `json:"server_name"`
+	// ServerAddress is how people reach the server, shown in alerts beside its name.
+	ServerAddress string             `json:"server_address"`
+	Defaults      Defaults           `json:"defaults"`
+	Limits        Limits             `json:"limits"`
+	API           API                `json:"api"`
+	Channels      map[string]Channel `json:"channels"`
+	Monitors      []Monitor          `json:"monitors"`
+	Maintenance   []Maintenance      `json:"maintenance"`
 	// Secrets is never printed or saved.
 	Secrets Secrets `json:"-"`
 }
 
 // Defaults apply to every monitor that does not set its own value.
 type Defaults struct {
-	Severity string    `json:"severity"`
-	Notify   []string  `json:"notify"`
-	For      Duration  `json:"for"`
-	Cooldown Duration  `json:"cooldown"`
-	Interval Duration  `json:"interval"`
+	Severity string    `json:"severity,omitempty"`
+	Notify   []string  `json:"notify,omitempty"`
+	For      Duration  `json:"for,omitempty"`
+	Cooldown Duration  `json:"cooldown,omitempty"`
+	Interval Duration  `json:"interval,omitempty"`
 	Flapping *Flapping `json:"flapping"`
 }
 
 // Flapping configures flapping detection. Nil means the defaults: 5 changes in 30 minutes.
 type Flapping struct {
 	Changes *int     `json:"changes"` // 0 turns it off
-	Window  Duration `json:"window"`
+	Window  Duration `json:"window,omitempty"`
 }
 
 // FlapLimits returns the effective changes and window.
@@ -56,12 +58,12 @@ func (d Defaults) FlapLimits() (int, time.Duration) {
 
 // Maintenance is a weekly window during which alerts are held back.
 type Maintenance struct {
-	Name     string   `json:"name"`
-	Days     []string `json:"days"`
-	From     string   `json:"from"`
-	To       string   `json:"to"`
-	Timezone string   `json:"timezone"`
-	Monitors []string `json:"monitors"`
+	Name     string   `json:"name,omitempty"`
+	Days     []string `json:"days,omitempty"`
+	From     string   `json:"from,omitempty"`
+	To       string   `json:"to,omitempty"`
+	Timezone string   `json:"timezone,omitempty"`
+	Monitors []string `json:"monitors,omitempty"`
 }
 
 // Limits bound how much pulse sends and keeps.
@@ -78,69 +80,70 @@ type API struct {
 // Channel is one alert destination. Only the fields for its Type are set.
 type Channel struct {
 	Type        string `json:"type"`
-	MinSeverity string `json:"min_severity"`
+	MinSeverity string `json:"min_severity,omitempty"`
 
-	Host     string   `json:"host"`
-	Port     int      `json:"port"`
-	TLS      string   `json:"tls"`
-	Username string   `json:"username"`
-	Password string   `json:"password"`
-	From     string   `json:"from"`
-	To       []string `json:"to"`
+	Host     string   `json:"host,omitempty"`
+	Port     int      `json:"port,omitempty"`
+	TLS      string   `json:"tls,omitempty"`
+	Username string   `json:"username,omitempty"`
+	Password string   `json:"password,omitempty"`
+	From     string   `json:"from,omitempty"`
+	To       []string `json:"to,omitempty"`
 
-	PhoneNumberID string `json:"phone_number_id"`
-	AccessToken   string `json:"access_token"`
-	Template      string `json:"template"`
-	Language      string `json:"language"`
+	PhoneNumberID string `json:"phone_number_id,omitempty"`
+	AccessToken   string `json:"access_token,omitempty"`
+	Template      string `json:"template,omitempty"`
+	Language      string `json:"language,omitempty"`
 
-	BotToken   string `json:"bot_token"`
-	ChatID     string `json:"chat_id"`
-	WebhookURL string `json:"webhook_url"`
+	BotToken   string `json:"bot_token,omitempty"`
+	ChatID     string `json:"chat_id,omitempty"`
+	WebhookURL string `json:"webhook_url,omitempty"`
 
-	URL     string   `json:"url"`
-	Secret  string   `json:"secret"`
-	Timeout Duration `json:"timeout"`
+	URL     string   `json:"url,omitempty"`
+	Secret  string   `json:"secret,omitempty"`
+	Timeout Duration `json:"timeout,omitempty"`
 
-	APIKey   string   `json:"api_key"`
-	WhatsApp []string `json:"whatsapp"`
-	SMS      []string `json:"sms"`
-	Email    []string `json:"email"`
+	APIKey   string   `json:"api_key,omitempty"`
+	WhatsApp []string `json:"whatsapp,omitempty"`
+	Email    []string `json:"email,omitempty"`
 }
 
 // Monitor is one thing to watch. Only the fields for its Type are set.
 type Monitor struct {
 	ID        string   `json:"id"`
 	Type      string   `json:"type"`
-	Name      string   `json:"name"`
-	Enabled   *bool    `json:"enabled"`
-	Interval  Duration `json:"interval"`
-	AlertWhen string   `json:"alert_when"`
-	ClearWhen string   `json:"clear_when"`
-	For       Duration `json:"for"`
-	Severity  string   `json:"severity"`
-	Notify    []string `json:"notify"`
-	Cooldown  Duration `json:"cooldown"`
+	Name      string   `json:"name,omitempty"`
+	Enabled   *bool    `json:"enabled,omitempty"`
+	Interval  Duration `json:"interval,omitempty"`
+	AlertWhen string   `json:"alert_when,omitempty"`
+	ClearWhen string   `json:"clear_when,omitempty"`
+	For       Duration `json:"for,omitempty"`
+	Severity  string   `json:"severity,omitempty"`
+	Notify    []string `json:"notify,omitempty"`
+	Cooldown  Duration `json:"cooldown,omitempty"`
 
-	Path            string          `json:"path"`
-	Service         string          `json:"service"`
-	Container       string          `json:"container"`
-	Match           string          `json:"match"`
-	Host            string          `json:"host"`
-	Port            int             `json:"port"`
-	Timeout         Duration        `json:"timeout"`
-	URL             string          `json:"url"`
-	Method          string          `json:"method"`
-	ExpectStatus    json.RawMessage `json:"expect_status"`
-	BodyContains    string          `json:"body_contains"`
-	FollowRedirects *bool           `json:"follow_redirects"`
-	File            string          `json:"file"`
-	Source          *LogSource      `json:"source"`
-	Pattern         string          `json:"pattern"`
-	Window          Duration        `json:"window"`
-	Run             []string        `json:"run"`
-	Parse           string          `json:"parse"`
-	ExpectEvery     Duration        `json:"expect_every"`
-	Grace           Duration        `json:"grace"`
+	Path            string          `json:"path,omitempty"`
+	Service         string          `json:"service,omitempty"`
+	Container       string          `json:"container,omitempty"`
+	Match           string          `json:"match,omitempty"`
+	Host            string          `json:"host,omitempty"`
+	Port            int             `json:"port,omitempty"`
+	Timeout         Duration        `json:"timeout,omitempty"`
+	URL             string          `json:"url,omitempty"`
+	Method          string          `json:"method,omitempty"`
+	ExpectStatus    json.RawMessage `json:"expect_status,omitempty"`
+	BodyContains    string          `json:"body_contains,omitempty"`
+	JSONPath        string          `json:"json_path,omitempty"`
+	JSONExpect      string          `json:"json_expect,omitempty"`
+	FollowRedirects *bool           `json:"follow_redirects,omitempty"`
+	File            string          `json:"file,omitempty"`
+	Source          *LogSource      `json:"source,omitempty"`
+	Pattern         string          `json:"pattern,omitempty"`
+	Window          Duration        `json:"window,omitempty"`
+	Run             []string        `json:"run,omitempty"`
+	Parse           string          `json:"parse,omitempty"`
+	ExpectEvery     Duration        `json:"expect_every,omitempty"`
+	Grace           Duration        `json:"grace,omitempty"`
 
 	// SourceFile is the config file the monitor came from, for messages.
 	SourceFile string `json:"-"`
@@ -148,7 +151,7 @@ type Monitor struct {
 
 // LogSource names where a log monitor reads from.
 type LogSource struct {
-	File     string  `json:"file"`
+	File     string  `json:"file,omitempty"`
 	Journal  *string `json:"journal"`
 	EventLog string  `json:"eventlog"`
 }
@@ -217,4 +220,6 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 }
 
 // MarshalJSON writes the duration in Go's notation.
-func (d Duration) MarshalJSON() ([]byte, error) { return json.Marshal(time.Duration(d).String()) }
+func (d Duration) MarshalJSON() ([]byte, error) {
+	return json.Marshal(duration.Format(time.Duration(d)))
+}

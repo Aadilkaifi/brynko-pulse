@@ -5,7 +5,9 @@ package channel
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"mime"
@@ -112,12 +114,28 @@ func (s *smtpSender) Send(ctx context.Context, a alert.Alert) error {
 
 func (s *smtpSender) message(a alert.Alert) []byte {
 	clean := strings.NewReplacer("\r", " ", "\n", " ")
+	crlf := func(t string) string { return strings.ReplaceAll(strings.ReplaceAll(t, "\r\n", "\n"), "\n", "\r\n") }
+	boundary := "pulse-" + randomHex(12)
 	var b strings.Builder
 	fmt.Fprintf(&b, "From: %s\r\n", clean.Replace(s.from))
 	fmt.Fprintf(&b, "To: %s\r\n", clean.Replace(strings.Join(s.to, ", ")))
 	fmt.Fprintf(&b, "Subject: %s\r\n", mime.QEncoding.Encode("utf-8", clean.Replace(a.Subject())))
 	fmt.Fprintf(&b, "Date: %s\r\n", time.Now().Format(time.RFC1123Z))
-	b.WriteString("MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n")
-	b.WriteString(strings.ReplaceAll(a.Text(), "\n", "\r\n"))
+	// Both forms: mail apps show the HTML, and fall back to the text when they cannot.
+	fmt.Fprintf(&b, "MIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=%q\r\n\r\n", boundary)
+	fmt.Fprintf(&b, "--%s\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n", boundary)
+	b.WriteString(crlf(a.Text()))
+	fmt.Fprintf(&b, "\r\n--%s\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n", boundary)
+	b.WriteString(crlf(a.HTML()))
+	fmt.Fprintf(&b, "\r\n--%s--\r\n", boundary)
 	return []byte(b.String())
+}
+
+// randomHex is a MIME boundary nothing in the message can contain by chance.
+func randomHex(n int) string {
+	buf := make([]byte, n)
+	if _, err := rand.Read(buf); err != nil {
+		return strconv.FormatInt(time.Now().UnixNano(), 16)
+	}
+	return hex.EncodeToString(buf)
 }

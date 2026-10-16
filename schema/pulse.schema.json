@@ -7,6 +7,7 @@
   "properties": {
     "version": { "$ref": "#/$defs/configVersion" },
     "server_name": { "$ref": "#/$defs/serverName" },
+    "server_address": { "type": "string", "maxLength": 200, "description": "How people reach this server, shown in alerts beside server_name, for example 203.0.113.10 or web-1.example.com." },
     "defaults": { "$ref": "#/$defs/defaults" },
     "limits": { "$ref": "#/$defs/limits" },
     "api": { "$ref": "#/$defs/api" },
@@ -24,6 +25,7 @@
       "properties": {
         "version": { "$ref": "#/$defs/configVersion" },
         "server_name": { "$ref": "#/$defs/serverName" },
+        "server_address": { "type": "string", "maxLength": 200, "description": "How people reach this server, shown in alerts beside server_name, for example 203.0.113.10 or web-1.example.com." },
         "defaults": { "$ref": "#/$defs/defaults" },
         "limits": { "$ref": "#/$defs/limits" },
         "api": { "$ref": "#/$defs/api" },
@@ -239,13 +241,11 @@
             "properties": {
               "api_key": { "$ref": "#/$defs/envRef" },
               "whatsapp": { "$ref": "#/$defs/phoneList" },
-              "sms": { "$ref": "#/$defs/phoneList" },
               "email": { "$ref": "#/$defs/emailList" }
             },
             "required": ["api_key"],
             "anyOf": [
               { "required": ["whatsapp"] },
-              { "required": ["sms"] },
               { "required": ["email"] }
             ]
           }
@@ -267,15 +267,15 @@
           "enum": ["cpu", "memory", "load", "swap", "disk", "service", "container", "process",
                    "port", "http", "ssl", "log", "file", "command", "heartbeat"]
         },
-        "name": { "type": "string", "maxLength": 120, "description": "Name shown in alerts. Default: the id." },
-        "enabled": { "type": "boolean", "default": true, "description": "false keeps the monitor but stops checking it." },
-        "interval": { "$ref": "#/$defs/duration", "description": "How often to check. Default: defaults.interval." },
+        "name": { "type": "string", "maxLength": 120, "description": "Shown in alerts and lists. Empty: the id." },
+        "enabled": { "type": "boolean", "default": true, "description": "Off keeps the monitor in its file but stops checking it." },
+        "interval": { "$ref": "#/$defs/duration", "description": "How often pulse measures it. Types that follow events (containers, services, files, logs) also notice a change at once; this is the regular check in between. Empty: the server's default (defaults.interval)." },
         "alert_when": { "$ref": "#/$defs/condition", "description": "The comparison that means something is wrong. Some types have a default." },
-        "clear_when": { "$ref": "#/$defs/condition", "description": "When it counts as fixed again, to avoid alerts going on and off around a threshold." },
-        "for": { "$ref": "#/$defs/duration", "description": "How long alert_when must hold before alerting." },
-        "severity": { "$ref": "#/$defs/severity", "description": "Default: defaults.severity." },
-        "notify": { "$ref": "#/$defs/notifyList", "description": "Channels for this monitor. Default: defaults.notify." },
-        "cooldown": { "$ref": "#/$defs/duration", "description": "How often to repeat while it keeps failing. Default: defaults.cooldown." }
+        "clear_when": { "$ref": "#/$defs/condition", "description": "When the problem counts as over, and pulse sends a resolved message. Set a lower level than the alert (alert above 85%, back to normal below 80%) so it does not flip back and forth around one value. Empty: as soon as alert_when is no longer true." },
+        "for": { "$ref": "#/$defs/duration", "description": "How long the problem must last before you are alerted, so a short spike does not wake anyone. Empty: the server's default (defaults.for), or at once when it sets none." },
+        "severity": { "$ref": "#/$defs/severity", "description": "How serious an alert is. Empty: the server's default (defaults.severity)." },
+        "notify": { "$ref": "#/$defs/notifyList", "description": "Channels told about this monitor. Empty: the server's default channels (defaults.notify)." },
+        "cooldown": { "$ref": "#/$defs/duration", "description": "While the problem lasts, the alert is sent again this often, until it is over. Empty: the server's default (defaults.cooldown)." }
       },
       "required": ["id", "type"],
       "allOf": [
@@ -286,28 +286,28 @@
         {
           "if": { "required": ["type"], "properties": { "type": { "const": "disk" } } },
           "then": {
-            "properties": { "path": { "type": "string", "minLength": 1 } },
+            "properties": { "path": { "type": "string", "minLength": 1, "description": "A filesystem's mount point, or any path on it, for example / or /data (on Windows D:\\)." } },
             "required": ["path", "alert_when"]
           }
         },
         {
           "if": { "required": ["type"], "properties": { "type": { "const": "service" } } },
           "then": {
-            "properties": { "service": { "type": "string", "minLength": 1 } },
+            "properties": { "service": { "type": "string", "minLength": 1, "description": "The service name, for example nginx: on Linux the systemd unit without .service, on Windows the service name." } },
             "required": ["service"]
           }
         },
         {
           "if": { "required": ["type"], "properties": { "type": { "const": "container" } } },
           "then": {
-            "properties": { "container": { "type": "string", "minLength": 1 } },
+            "properties": { "container": { "type": "string", "minLength": 1, "description": "The container name, as docker ps shows it." } },
             "required": ["container"]
           }
         },
         {
           "if": { "required": ["type"], "properties": { "type": { "const": "process" } } },
           "then": {
-            "properties": { "match": { "type": "string", "minLength": 1 } },
+            "properties": { "match": { "type": "string", "minLength": 1, "description": "The process name exactly as ps shows it, for example nginx. On Linux a process whose command line contains it also counts." } },
             "required": ["match"]
           }
         },
@@ -315,9 +315,9 @@
           "if": { "required": ["type"], "properties": { "type": { "const": "port" } } },
           "then": {
             "properties": {
-              "host": { "type": "string", "minLength": 1, "default": "127.0.0.1" },
-              "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
-              "timeout": { "$ref": "#/$defs/duration", "default": "5s" }
+              "host": { "type": "string", "minLength": 1, "default": "127.0.0.1", "description": "Where to connect. Empty: this server (127.0.0.1)." },
+              "port": { "type": "integer", "minimum": 1, "maximum": 65535, "description": "The TCP port, for example 443." },
+              "timeout": { "$ref": "#/$defs/duration", "default": "5s", "description": "Give up after this long." }
             },
             "required": ["port"]
           }
@@ -327,16 +327,19 @@
           "then": {
             "properties": {
               "url": { "description": "Must start with http:// or https://.", "type": "string", "pattern": "^https?://" },
-              "method": { "enum": ["GET", "HEAD", "POST"], "default": "GET" },
+              "method": { "enum": ["GET", "HEAD", "POST"], "default": "GET", "description": "GET for pages and most APIs." },
               "expect_status": {
+                "description": "Status codes that count as up, for example 200, or 200 and 301. Empty: any 2xx or 3xx.",
                 "oneOf": [
                   { "type": "integer", "minimum": 100, "maximum": 599 },
                   { "type": "array", "items": { "type": "integer", "minimum": 100, "maximum": 599 }, "minItems": 1 }
                 ]
               },
-              "body_contains": { "type": "string", "minLength": 1 },
-              "timeout": { "$ref": "#/$defs/duration", "default": "10s" },
-              "follow_redirects": { "type": "boolean", "default": true }
+              "body_contains": { "type": "string", "minLength": 1, "description": "Text the answer must contain. pulse reads the answer as text (up to 1 MB) and looks for this exactly as written, capitals included, for example \"status\":\"ok\"." },
+              "json_path": { "type": "string", "maxLength": 200, "pattern": "^[A-Za-z0-9_$-]+(\\.[A-Za-z0-9_$-]+)*$", "description": "For a JSON answer: the field to read, for example status, data.state or items.0.name (a number picks a list item). Alert on its value with json_value (a number or text), or on whether it is there with json_found." },
+              "json_expect": { "type": "string", "maxLength": 200, "pattern": "^\\s*(==|!=|>=|<=|>|<)\\s*\\S", "description": "The value the JSON field must have, as a comparison: == ok, != error, > 0. When set, a different value counts as not answering as expected. Text is compared with == or != only; quote a number to compare it as text." },
+              "timeout": { "$ref": "#/$defs/duration", "default": "10s", "description": "Give up after this long." },
+              "follow_redirects": { "type": "boolean", "default": true, "description": "Follow redirects to the final page." }
             },
             "required": ["url"]
           }
@@ -346,7 +349,7 @@
           "then": {
             "properties": {
               "host": { "description": "A host name with an optional port, for example example.com:443.", "type": "string", "pattern": "^[A-Za-z0-9.-]+(:[0-9]{1,5})?$" },
-              "file": { "type": "string", "minLength": 1 }
+              "file": { "type": "string", "minLength": 1, "description": "Or a certificate file on this server, for example /etc/ssl/certs/site.pem." }
             },
             "oneOf": [ { "required": ["host"] }, { "required": ["file"] } ]
           }
@@ -376,7 +379,7 @@
         {
           "if": { "required": ["type"], "properties": { "type": { "const": "file" } } },
           "then": {
-            "properties": { "path": { "type": "string", "minLength": 1 } },
+            "properties": { "path": { "type": "string", "minLength": 1, "description": "The file to watch, for example /var/backups/db.sql.gz." } },
             "required": ["path", "alert_when"]
           }
         },
@@ -388,18 +391,18 @@
                 "description": "The program and its arguments. Never run through a shell.",
                 "type": "array", "items": { "type": "string" }, "minItems": 1
               },
-              "parse": { "enum": ["exit_code", "text", "number"], "default": "exit_code" },
-              "timeout": { "$ref": "#/$defs/duration", "default": "30s" }
+              "parse": { "enum": ["exit_code", "text", "number"], "default": "exit_code", "description": "What to read: only the exit code, the output as text, or the output as a number (it must start with one)." },
+              "timeout": { "$ref": "#/$defs/duration", "default": "30s", "description": "Give up after this long." }
             },
-            "required": ["run", "alert_when"]
+            "required": ["run"]
           }
         },
         {
           "if": { "required": ["type"], "properties": { "type": { "const": "heartbeat" } } },
           "then": {
             "properties": {
-              "expect_every": { "$ref": "#/$defs/duration" },
-              "grace": { "$ref": "#/$defs/duration", "default": "1m" }
+              "expect_every": { "$ref": "#/$defs/duration", "description": "How often the job runs, for example 1d for a nightly job." },
+              "grace": { "$ref": "#/$defs/duration", "default": "1m", "description": "Extra time allowed before it counts as late." }
             },
             "required": ["expect_every"]
           }

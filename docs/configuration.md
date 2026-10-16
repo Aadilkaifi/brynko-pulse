@@ -47,6 +47,38 @@ can show what the monitor would measure before anything changes. `set` and `dele
 as it was. Secrets are read from standard input, so they never appear in the process list, and
 `config show` lists their names only, never their values.
 
+`server_address` in `pulse.yaml` (optional) is how people reach the server, for example its IP
+address. Alerts show it beside `server_name`.
+
+To build a form, a tool also needs to know what each monitor type measures and what the server
+has to watch:
+
+- `pulse schema` adds `x-types` to the schema: every monitor type with its label, the field that
+  names what it watches, the values its checks produce (name, kind, unit, meaning), and its default
+  condition (or a suggested first one when it has none). A form can then offer "used space above
+  85%" instead of a free-text condition. Each type also names its main fields (shown first), how it notices a
+  change at once between checks (`instant`), and, for websites, a `choice` between checking the
+  status only, a text or a JSON field.
+- `sudo pulse suggest --json` lists what this server has: filesystems with their device, size and
+  use, running services, running containers and listening ports, so a form can offer a pick list.
+
+The brynko devOps Agent desktop app is built this way: see [Using pulse from an app](ui.md).
+
+## Turning a monitor off
+
+A monitor with `enabled: false` stays in its file but is not checked and never alerts. Remove the
+line (or set it to `true`) to watch it again. `pulse install` adds the services, containers and web
+ports it finds this way, so you choose which ones matter:
+
+```yaml
+- id: service-nginx
+  type: service
+  enabled: false
+  service: nginx
+```
+
+`pulse status` lists such monitors as `INACTIVE`, last.
+
 ## Secrets
 
 Secret fields only accept a reference, `${NAME}`. Put the value in `secrets.env`, one per line:

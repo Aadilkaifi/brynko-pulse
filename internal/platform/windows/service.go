@@ -151,13 +151,41 @@ func (Platform) Uninstall(ctx context.Context, _ host.UninstallOptions) (host.Un
 	_ = eventlog.Remove(host.ServiceName)
 
 	bin := binaryPath()
-	if err := os.Remove(bin); err == nil {
+	later, err := removeBinary(bin)
+	switch {
+	case err == nil && later:
+		res.Steps = append(res.Steps, "Removed "+bin+" (Windows deletes the file at the next restart, as it is in use now)")
+	case err == nil:
 		res.Steps = append(res.Steps, "Removed "+bin)
 		_ = os.Remove(filepath.Dir(bin)) // only succeeds when empty
-	} else if !errors.Is(err, os.ErrNotExist) {
+	case !errors.Is(err, os.ErrNotExist):
 		return res, err
 	}
 	return res, nil
+}
+
+// removeBinary deletes pulse.exe. Windows keeps the file of a running program, and `pulse uninstall` is
+// usually run from that very file: then it is renamed aside (allowed while it runs) and Windows is asked
+// to delete it at the next restart. `later` says so.
+func removeBinary(bin string) (later bool, err error) {
+	err = os.Remove(bin)
+	if err == nil || errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	self, serr := os.Executable()
+	if serr != nil || !strings.EqualFold(filepath.Clean(self), filepath.Clean(bin)) {
+		return false, err
+	}
+	old := bin + ".old"
+	_ = os.Remove(old)
+	if err := os.Rename(bin, old); err != nil {
+		return false, err
+	}
+	p, err := windows.UTF16PtrFromString(old)
+	if err != nil {
+		return false, err
+	}
+	return true, windows.MoveFileEx(p, nil, windows.MOVEFILE_DELAY_UNTIL_REBOOT)
 }
 
 func commandLine(bin string, args []string) string {

@@ -235,6 +235,7 @@ func configShow(dir string, asJSON bool, stdout, stderr io.Writer) int {
 		Files       []string                  `json:"files"`
 		Secrets     []string                  `json:"secrets"`
 		ServerName  string                    `json:"server_name,omitempty"`
+		ServerAddr  string                    `json:"server_address,omitempty"`
 		Defaults    *config.Defaults          `json:"defaults,omitempty"`
 		Limits      *config.Limits            `json:"limits,omitempty"`
 		Maintenance []config.Maintenance      `json:"maintenance"`
@@ -244,7 +245,7 @@ func configShow(dir string, asJSON bool, stdout, stderr io.Writer) int {
 		Warnings: nonNil(res.Warnings), Files: files, Secrets: secrets,
 		Maintenance: []config.Maintenance{}, Channels: map[string]config.Channel{}, Monitors: []monitorView{}}
 	if cfg != nil {
-		out.ServerName, out.Defaults, out.Limits = cfg.ServerName, &cfg.Defaults, &cfg.Limits
+		out.ServerName, out.ServerAddr, out.Defaults, out.Limits = cfg.ServerName, cfg.ServerAddress, &cfg.Defaults, &cfg.Limits
 		if cfg.Maintenance != nil {
 			out.Maintenance = cfg.Maintenance
 		}

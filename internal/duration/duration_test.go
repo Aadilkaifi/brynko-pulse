@@ -31,3 +31,14 @@ func TestParse(t *testing.T) {
 		}
 	}
 }
+
+func TestFormat(t *testing.T) {
+	for d, want := range map[time.Duration]string{
+		0: "0s", 30 * time.Second: "30s", 15 * time.Minute: "15m", time.Hour: "1h",
+		90 * time.Minute: "1h30m", 26 * time.Hour: "26h", 500 * time.Millisecond: "500ms", 90 * time.Second: "1m30s",
+	} {
+		if got := Format(d); got != want {
+			t.Errorf("Format(%v) = %q, want %q", d, got, want)
+		}
+	}
+}

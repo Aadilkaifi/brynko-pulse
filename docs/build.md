@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- Go 1.22 or newer. Check with `go version`.
+- Go 1.24 or newer. Check with `go version`.
 - Git.
 
 No C compiler is needed: pulse builds with `CGO_ENABLED=0` for every platform.
@@ -73,8 +73,9 @@ The `.deb` and `.rpm` packages are built with [nfpm](https://nfpm.goreleaser.com
 `packaging/nfpm.yaml`. nfpm is only used to build them; nothing extra is installed on servers.
 
 ```sh
-go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.41.1
-VERSION=0.0.0-dev ARCH=amd64 BINARY=./pulse nfpm package --config packaging/nfpm.yaml --packager deb --target dist/
+go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.48.0
+mkdir -p dist/pkg && cp pulse dist/pkg/pulse          # nfpm takes the binary from dist/pkg/pulse
+VERSION=0.0.0-dev ARCH=amd64 nfpm package --config packaging/nfpm.yaml --packager deb --target dist/
 ```
 
 ## Releases

@@ -28,12 +28,16 @@ Or install the `.deb` or `.rpm` from the releases page, or run the Windows binar
 ## First steps
 
 ```sh
-pulse status                          # install already watches the services and containers it found
-sudoedit /etc/brynko-pulse/channels.yaml
+pulse status                          # disk, memory, CPU and swap are watched; what install found is listed, inactive
+sudoedit /etc/brynko-pulse/monitors/service-nginx.yaml   # remove "enabled: false" to watch it
+sudoedit /etc/brynko-pulse/channels.yaml                 # where alerts go
 sudo pulse validate                   # says exactly what to fix
 sudo pulse test channel ops-email     # sends a test alert
 sudo systemctl reload brynko-pulse    # applies the change
 ```
+
+Prefer a graphical interface? The brynko devOps Agent desktop app installs and manages pulse on
+your servers over SSH. See [Using pulse from an app](docs/ui.md).
 
 ## Documentation
 
@@ -46,6 +50,7 @@ sudo systemctl reload brynko-pulse    # applies the change
 | [Operations](docs/operations.md) | Status, history, logs, troubleshooting |
 | [Command reference](docs/cli.md) | Every command and flag |
 | [Configuration reference](docs/config-reference.md) | Every config field |
+| [Using pulse from an app](docs/ui.md) | The brynko devOps Agent desktop app: install, monitors, channels, settings |
 | [Building from source](docs/build.md) | Build, test, release |
 
 Every command that prints data accepts `--json`. That output is a versioned contract

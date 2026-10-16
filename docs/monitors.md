@@ -6,7 +6,8 @@ is just an id and a type. Every field of every type is listed in the
 [configuration reference](config-reference.md).
 
 The quickest way to add one is `pulse add` (see `pulse add -h`), or let `pulse discover` suggest
-monitors for what runs on the server. To see what a monitor measures right now:
+monitors for what runs on the server. Tools read the same list of types and values from
+`pulse schema` (`x-types`), and what the server has to watch from `pulse suggest`. To see what a monitor measures right now:
 
 ```sh
 sudo pulse test monitor <id>
@@ -15,6 +16,25 @@ sudo pulse test monitor <id>
 Conditions compare numbers (`> < >= <= == !=`), durations (`age > 1d`), true/false values
 (`running == 0` means not running) and text (`state == "failed"`). See
 [Configuration](configuration.md#conditions).
+
+## Fields every monitor has
+
+| Field | What it does |
+|---|---|
+| `id` | Unique name, used by `status`, `history`, silences and `ping` |
+| `type` | One of the types below |
+| `name` | Shown in alerts and lists; the id when empty |
+| `enabled` | `false` keeps the monitor in its file without checking it |
+| `alert_when` | The comparison that means something is wrong; many types have a default |
+| `clear_when` | When the problem counts as over; by default when `alert_when` is no longer true |
+| `for` | How long a problem must last before alerting |
+| `severity` | `info`, `warning` or `critical` |
+| `notify` | Channels to tell; `defaults.notify` when empty |
+| `cooldown` | How often to repeat the alert while the problem lasts |
+| `interval` | How often to measure; changes to services, containers, files and logs are also noticed at once |
+
+Empty fields take the values under `defaults` in `pulse.yaml` (see
+[Configuration](configuration.md#defaults)).
 
 ## `disk`
 
@@ -101,9 +121,30 @@ instead. `pulse discover` suggests port checks only for web ports (80 and 443).
 
 A web address. Redirects are followed unless `follow_redirects: false`.
 
-- **Values:** `ok`, `status`, `latency_ms`, `body_match` (when `body_contains` is set), `error`.
+- **Values:** `ok`, `status`, `latency_ms`, `body_match` (when `body_contains` is set),
+  `json_found` and `json_value` (when `json_path` is set), `json_match` (when `json_expect` is set),
+  `error`.
 - **Default condition:** `ok == 0`. `ok` means the status is 2xx or 3xx, or one of
-  `expect_status`, and the body contains `body_contains` when set.
+  `expect_status`, the body contains `body_contains` when set, and the JSON field matches
+  `json_expect` when set.
+
+To check what an API answers, give `json_path`: the field to read, with dots between keys and a
+number for a list item (`status`, `data.state`, `items.0.name`), and `json_expect`: the value it
+must have, as a comparison (`== ok`, `!= error`, `> 0`). A number is compared as a number, text with
+`==` or `!=` only. Quote the whole comparison when it starts with `>` or `<`
+(`json_expect: "> 0"`): YAML reads a bare `>` as the start of a text block. The default condition then alerts on a wrong status, a missing field or another
+value alike, and the alert says which (`JSON field is "degraded"`):
+
+```yaml
+- id: api-health
+  type: http
+  url: https://api.example.com/health
+  json_path: data.status
+  json_expect: == ok
+```
+
+Without `json_expect`, the value is still read: `json_value` (a number or text) and `json_found`
+can be used in `alert_when` like any other value.
 
 ```yaml
 - id: site

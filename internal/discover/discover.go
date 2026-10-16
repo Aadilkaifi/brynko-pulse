@@ -56,25 +56,28 @@ func Suggest(inv host.Inventory, containers []string, cfg *config.Config, rootDi
 		out = append(out, Suggestion{ID: r.ID, Type: s.Type, Why: why, File: r.Path, YAML: string(r.YAML)})
 	}
 
-	for _, t := range []string{"disk", "memory", "cpu"} {
+	// The system monitors start active; what runs on the server is added inactive, so the
+	// user turns on the few that matter instead of muting the many that do not.
+	for _, t := range []string{"disk", "memory", "cpu", "swap"} {
 		target := ""
 		if t == "disk" {
 			target = rootDisk
 		}
 		add(quickadd.Spec{Type: t, Target: target}, "type:"+t, "every server needs it")
 	}
+	const off = ", added inactive: turn it on to watch it"
 	for _, s := range inv.Services {
-		add(quickadd.Spec{Type: "service", Target: s}, "service:"+s, "the "+s+" service is running")
+		add(quickadd.Spec{Type: "service", Target: s, Inactive: true}, "service:"+s, "the "+s+" service is running"+off)
 	}
 	for _, c := range containers {
-		add(quickadd.Spec{Type: "container", Target: c}, "container:"+c, "the "+c+" container is running")
+		add(quickadd.Spec{Type: "container", Target: c, Inactive: true}, "container:"+c, "the "+c+" container is running"+off)
 	}
 	for _, p := range inv.Ports {
 		if !webPorts[p.Port] || have["port:"+strconv.Itoa(p.Port)] {
 			continue
 		}
-		add(quickadd.Spec{Type: "port", Target: portTarget(p)}, "port:"+strconv.Itoa(p.Port),
-			fmt.Sprintf("the web server listens on port %d", p.Port))
+		add(quickadd.Spec{Type: "port", Target: portTarget(p), Inactive: true}, "port:"+strconv.Itoa(p.Port),
+			fmt.Sprintf("the web server listens on port %d", p.Port)+off)
 	}
 	others := 0
 	for _, p := range inv.Ports {
@@ -107,7 +110,7 @@ func watched(cfg *config.Config) map[string]bool {
 	for _, m := range cfg.Monitors {
 		have["id:"+m.ID] = true
 		switch m.Type {
-		case "disk", "memory", "cpu":
+		case "disk", "memory", "cpu", "swap":
 			have["type:"+m.Type] = true
 		case "service":
 			have["service:"+m.Service] = true

@@ -103,13 +103,14 @@ Posts each alert as JSON to any URL, for your own tools.
     secret: ${PULSE_WEBHOOK_SECRET}   # optional
 ```
 
-The body has `server`, `monitor`, `monitor_name`, `monitor_type`, `kind` (`firing`, `repeat`,
-`resolved`, `flapping`, `settled`, `summary`, `test`), `severity`, `detail`, `condition`, `since`,
-`at` and `duration_ns`. With a `secret`, each request carries `X-Pulse-Timestamp` and
+The body has `server`, `server_address` (when set), `monitor`, `monitor_name`, `monitor_type`,
+`type_label` (the type in words), `kind` (`firing`, `repeat`, `resolved`, `flapping`, `settled`,
+`summary`, `test`), `severity`, `detail`, `condition`, `rule` (the condition in words), `since`,
+`at` and `duration_ns`. Fields with no value are left out. With a `secret`, each request carries `X-Pulse-Timestamp` and
 `X-Pulse-Signature: sha256=<hex>`, the HMAC-SHA256 of `<timestamp>.<body>` with the secret. Check
 it, and reject old timestamps, to know the request came from your pulse.
 
 ## `brynko`
 
-Not available yet. The brynko relay will send WhatsApp, SMS and email for you, paid from brynko
+Not available yet. The brynko relay will send WhatsApp and email for you, paid from brynko
 account credits, for people who do not want their own mail server or Meta account.

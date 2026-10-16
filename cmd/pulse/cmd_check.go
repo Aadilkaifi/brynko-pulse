@@ -63,7 +63,7 @@ func fail(stdout, stderr io.Writer, asJSON bool, command string, err error) int 
 
 func testChannel(cfg *config.Config, id string, stdout, stderr io.Writer, asJSON bool) int {
 	d := notify.New(cfg, channel.NewHTTPClient(), slog.New(slog.NewTextHandler(io.Discard, nil)))
-	a := alert.Alert{Server: cfg.ServerName, Monitor: "test", MonitorName: "test", MonitorType: "test",
+	a := alert.Alert{Server: cfg.ServerName, ServerAddress: cfg.ServerAddress, Monitor: "test", MonitorName: "test", MonitorType: "test",
 		Kind: alert.KindTest, Severity: "info", At: time.Now(),
 		Detail: fmt.Sprintf("This is a test alert from pulse on %s. If you can read it, the %s channel works.", cfg.ServerName, id)}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -89,6 +89,7 @@ func testChannel(cfg *config.Config, id string, stdout, stderr io.Writer, asJSON
 // monitorTest is what one check of a monitor found, as `pulse test` reports it.
 type monitorTest struct {
 	Monitor    string      `json:"monitor"`
+	Type       string      `json:"type"`
 	Values     rule.Values `json:"values"`
 	Condition  string      `json:"condition"`
 	WouldAlert bool        `json:"would_alert"`
@@ -143,7 +144,7 @@ func checkMonitor(ctx context.Context, cfg *config.Config, m config.Monitor, dat
 		time.Sleep(time.Second)
 		values, err = chk.Check(ctx)
 	}
-	res := monitorTest{Monitor: eff.ID, Values: values, Condition: alertC.Raw}
+	res := monitorTest{Monitor: eff.ID, Type: eff.Type, Values: values, Condition: alertC.Raw}
 	if res.Values == nil {
 		res.Values = rule.Values{}
 	}
@@ -156,7 +157,7 @@ func checkMonitor(ctx context.Context, cfg *config.Config, m config.Monitor, dat
 		if res.WouldAlert, err = alertC.Eval(values); err != nil {
 			res.WouldAlert, res.Detail = true, err.Error()
 		} else {
-			res.Detail = alertC.Describe(values)
+			res.Detail = monitor.Describe(eff.Type, alertC, values)
 		}
 	}
 	return res, nil
@@ -164,7 +165,7 @@ func checkMonitor(ctx context.Context, cfg *config.Config, m config.Monitor, dat
 
 func printMonitorTest(w io.Writer, res monitorTest) {
 	for _, k := range rule.Names(res.Values) {
-		fmt.Fprintf(w, "  %-22s %s\n", k, rule.Format(res.Values[k]))
+		fmt.Fprintf(w, "  %-22s %s\n", k, monitor.DescribeValue(res.Type, k, res.Values[k]))
 	}
 	verdict := "not met, no alert"
 	if res.WouldAlert {

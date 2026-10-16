@@ -5,7 +5,9 @@
 package alert
 
 import (
+	"bytes"
 	"fmt"
+	"html/template"
 	"strings"
 	"time"
 )
@@ -23,17 +25,21 @@ const (
 
 // Alert is one notification. Its JSON form is what webhooks receive.
 type Alert struct {
-	Server      string        `json:"server"`
-	Monitor     string        `json:"monitor"`
-	MonitorName string        `json:"monitor_name"`
-	MonitorType string        `json:"monitor_type"`
-	Kind        string        `json:"kind"`
-	Severity    string        `json:"severity"`
-	Detail      string        `json:"detail"`
-	Condition   string        `json:"condition,omitempty"`
-	Since       time.Time     `json:"since,omitempty"`
-	At          time.Time     `json:"at"`
-	Duration    time.Duration `json:"duration_ns,omitempty"`
+	Server        string `json:"server"`
+	ServerAddress string `json:"server_address,omitempty"` // how people reach the server, when configured
+	Monitor       string `json:"monitor"`
+	MonitorName   string `json:"monitor_name"`
+	MonitorType   string `json:"monitor_type"`
+	TypeLabel     string `json:"type_label,omitempty"` // the type in words, such as "Disk"
+	Kind          string `json:"kind"`
+	Severity      string `json:"severity"`
+	Detail        string `json:"detail"`
+	Condition     string `json:"condition,omitempty"`
+	// Rule is the condition in words, such as "used space is above 85%".
+	Rule     string        `json:"rule,omitempty"`
+	Since    time.Time     `json:"since,omitzero"`
+	At       time.Time     `json:"at"`
+	Duration time.Duration `json:"duration_ns,omitempty"`
 }
 
 var severityRank = map[string]int{"info": 0, "warning": 1, "critical": 2}
@@ -43,47 +49,167 @@ func AtLeast(sev, min string) bool {
 	return severityRank[sev] >= severityRank[min]
 }
 
-// Subject is a one-line summary, used as an email subject.
-func (a Alert) Subject() string {
-	name := a.MonitorName
+// state is the word an alert leads with.
+func (a Alert) state() string {
 	switch a.Kind {
 	case KindResolved:
-		return fmt.Sprintf("Resolved on %s: %s", a.Server, name)
+		return "Resolved"
 	case KindRepeat:
-		return fmt.Sprintf("Still failing on %s: %s", a.Server, name)
+		return "Still failing"
 	case KindSummary:
-		return fmt.Sprintf("Many alerts on %s", a.Server)
+		return "Many alerts"
 	case KindTest:
-		return fmt.Sprintf("Test alert from %s", a.Server)
+		return "Test"
 	case KindFlapping:
-		return fmt.Sprintf("Flapping on %s: %s", a.Server, name)
+		return "Flapping"
 	case KindSettled:
-		return fmt.Sprintf("Settled on %s: %s", a.Server, name)
-	default:
-		return fmt.Sprintf("%s on %s: %s", strings.ToUpper(a.Severity), a.Server, name)
+		return "Settled"
 	}
+	if a.Severity == "" {
+		return "Alert"
+	}
+	return strings.ToUpper(a.Severity[:1]) + a.Severity[1:]
+}
+
+// Headline is what happened, in one line: "disk-data: Used space: 91.2%".
+func (a Alert) Headline() string {
+	switch a.Kind {
+	case KindResolved:
+		return fmt.Sprintf("%s is back to normal after %s", a.MonitorName, Human(a.Duration))
+	case KindSummary, KindTest, KindFlapping, KindSettled:
+		if a.MonitorName != "" && a.Kind != KindSummary && a.Kind != KindTest {
+			return fmt.Sprintf("%s is %s", a.MonitorName, strings.ToLower(a.state()))
+		}
+		return a.Detail
+	}
+	if a.Detail == "" {
+		return a.MonitorName
+	}
+	return a.MonitorName + ": " + a.Detail
+}
+
+// Subject is a one-line summary, used as an email subject: the state first, then
+// the server and what happened, so a list of alerts reads at a glance.
+func (a Alert) Subject() string {
+	switch a.Kind {
+	case KindSummary:
+		return fmt.Sprintf("[Many alerts] %s", a.Server)
+	case KindTest:
+		return fmt.Sprintf("[Test] %s: alerts reach you", a.Server)
+	}
+	return fmt.Sprintf("[%s] %s: %s", a.state(), a.Server, a.Headline())
+}
+
+// fact is one labelled line of the message.
+type fact struct{ Label, Value string }
+
+func (a Alert) facts() []fact {
+	server := a.Server
+	if a.ServerAddress != "" {
+		server += " (" + a.ServerAddress + ")"
+	}
+	out := []fact{{"Server", server}}
+	if a.Monitor != "" && a.Kind != KindSummary && a.Kind != KindTest {
+		mon := a.Monitor
+		if a.TypeLabel != "" {
+			mon += " (" + a.TypeLabel + ")"
+		}
+		out = append(out, fact{"Monitor", mon})
+	}
+	if !a.Since.IsZero() && a.Kind != KindResolved {
+		out = append(out, fact{"Started", fmt.Sprintf("%s, %s ago", a.Since.Local().Format("2 Jan 2006, 15:04 MST"),
+			Human(a.At.Sub(a.Since)))})
+	}
+	if a.Kind == KindResolved && a.Detail != "" {
+		out = append(out, fact{"Now", a.Detail})
+	}
+	if a.Severity != "" && a.Kind != KindResolved && a.Kind != KindTest {
+		out = append(out, fact{"Severity", a.Severity})
+	}
+	return out
+}
+
+func (a Alert) rule() string {
+	if a.Rule != "" {
+		return "Alerts when " + a.Rule + "."
+	}
+	if a.Condition != "" {
+		return "Alert rule: " + a.Condition
+	}
+	return ""
 }
 
 // Text is the full message in plain text.
 func (a Alert) Text() string {
 	var b strings.Builder
-	b.WriteString(a.Subject())
-	b.WriteString("\n\n")
+	fmt.Fprintf(&b, "%s on %s\n\n%s\n", strings.ToUpper(a.state()), a.Server, a.Headline())
 	switch a.Kind {
-	case KindResolved:
-		fmt.Fprintf(&b, "%s is back to normal after %s.\nNow: %s\n", a.MonitorName, Human(a.Duration), a.Detail)
-	case KindSummary, KindTest, KindFlapping, KindSettled:
+	case KindFiring, KindRepeat, "":
+		if r := a.rule(); r != "" {
+			b.WriteString(r + "\n")
+		}
+	case KindFlapping, KindSettled:
 		b.WriteString(a.Detail + "\n")
-	default:
-		fmt.Fprintf(&b, "%s\n", a.Detail)
-		if a.Condition != "" {
-			fmt.Fprintf(&b, "Alert rule: %s\n", a.Condition)
-		}
-		if !a.Since.IsZero() {
-			fmt.Fprintf(&b, "Since: %s (%s)\n", a.Since.UTC().Format("2006-01-02 15:04 MST"), Human(a.At.Sub(a.Since)))
-		}
 	}
-	fmt.Fprintf(&b, "\nServer: %s\nMonitor: %s (%s)\n", a.Server, a.Monitor, a.MonitorType)
+	b.WriteString("\n")
+	for _, f := range a.facts() {
+		fmt.Fprintf(&b, "%-9s %s\n", f.Label, f.Value)
+	}
+	return b.String()
+}
+
+// colour is the band at the top of the email: the severity, or green when it is over.
+func (a Alert) colour() string {
+	switch a.Kind {
+	case KindResolved, KindSettled:
+		return "#1a7f37"
+	case KindTest, KindSummary:
+		return "#5f6368"
+	}
+	switch a.Severity {
+	case "critical":
+		return "#c0392b"
+	case "info":
+		return "#2f6fd8"
+	}
+	return "#b7791f"
+}
+
+var htmlTmpl = template.Must(template.New("alert").Parse(`<!doctype html>
+<html><body style="margin:0;padding:24px;background:#f3f4f6;font-family:Segoe UI,Helvetica,Arial,sans-serif;color:#1a1a1a">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e3e5e8;border-radius:8px">
+<tr><td style="height:6px;background:{{.Colour}};border-radius:8px 8px 0 0"></td></tr>
+<tr><td style="padding:20px 24px 4px">
+<div style="font-size:12px;font-weight:600;letter-spacing:.04em;color:{{.Colour}};text-transform:uppercase">{{.State}} &middot; {{.Server}}</div>
+<div style="font-size:18px;font-weight:600;margin-top:6px;line-height:1.35">{{.Headline}}</div>
+{{if .Rule}}<div style="font-size:13px;color:#5f6368;margin-top:6px">{{.Rule}}</div>{{end}}
+{{if .Note}}<div style="font-size:13px;color:#5f6368;margin-top:6px">{{.Note}}</div>{{end}}
+</td></tr>
+<tr><td style="padding:14px 24px 22px">
+<table role="presentation" cellpadding="0" cellspacing="0" style="font-size:13px;line-height:1.6">
+{{range .Facts}}<tr><td style="color:#5f6368;padding-right:18px;vertical-align:top">{{.Label}}</td><td>{{.Value}}</td></tr>{{end}}
+</table></td></tr>
+<tr><td style="padding:12px 24px;border-top:1px solid #e3e5e8;font-size:11px;color:#8a8f98">Sent by brynko-pulse on {{.Server}}.</td></tr>
+</table></body></html>
+`))
+
+// HTML is the message as a small, self-contained HTML email: a colour band for the
+// severity, the headline, the rule in words and the facts. No images, no links to load.
+func (a Alert) HTML() string {
+	data := struct {
+		Colour, State, Server, Headline, Rule, Note string
+		Facts                                       []fact
+	}{Colour: a.colour(), State: a.state(), Server: a.Server, Headline: a.Headline(), Facts: a.facts()}
+	switch a.Kind {
+	case KindFiring, KindRepeat, "":
+		data.Rule = a.rule()
+	case KindFlapping, KindSettled:
+		data.Note = a.Detail
+	}
+	var b bytes.Buffer
+	if err := htmlTmpl.Execute(&b, data); err != nil {
+		return "<pre>" + template.HTMLEscapeString(a.Text()) + "</pre>"
+	}
 	return b.String()
 }
 

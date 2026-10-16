@@ -59,6 +59,9 @@ func cmdStatus(args []string, stdout, stderr io.Writer) int {
 	rank := map[engine.Status]int{engine.Firing: 0, engine.Pending: 1, engine.Unknown: 2, engine.OK: 3}
 	sort.Slice(ids, func(i, j int) bool {
 		a, b := snap.Monitors[ids[i]], snap.Monitors[ids[j]]
+		if a.Enabled != b.Enabled {
+			return a.Enabled // inactive monitors last
+		}
 		if ra, rb := rank[a.Status], rank[b.Status]; ra != rb {
 			return ra < rb
 		}
@@ -70,7 +73,9 @@ func cmdStatus(args []string, stdout, stderr io.Writer) int {
 	for _, id := range ids {
 		m := snap.Monitors[id]
 		status, since, detail := string(m.Status), "", m.Detail
-		if m.Error != "" {
+		if !m.Enabled {
+			status, detail = "inactive", "turned off (enabled: false)"
+		} else if m.Error != "" {
 			status, detail = "not running", m.Error
 		}
 		if !m.ProblemSince.IsZero() {

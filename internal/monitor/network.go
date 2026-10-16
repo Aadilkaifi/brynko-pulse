@@ -4,6 +4,7 @@
 package monitor
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -48,10 +49,22 @@ type httpCheck struct {
 	method   string
 	statuses []int // empty means any 2xx or 3xx
 	contains string
+	jsonPath []string // json_path split on dots; empty when not set
+	expect   *rule.Expect
 }
 
 func newHTTP(m config.Monitor) (Checker, error) {
 	c := &httpCheck{url: m.URL, method: or(m.Method, http.MethodGet), contains: m.BodyContains}
+	if m.JSONPath != "" {
+		c.jsonPath = strings.Split(m.JSONPath, ".")
+	}
+	if m.JSONExpect != "" {
+		e, err := rule.ParseExpect(m.JSONExpect)
+		if err != nil {
+			return nil, fmt.Errorf("json_expect: %w", err)
+		}
+		c.expect = &e
+	}
 	if len(m.ExpectStatus) > 0 {
 		var one int
 		if err := json.Unmarshal(m.ExpectStatus, &one); err == nil {
@@ -91,11 +104,26 @@ func (c *httpCheck) Check(ctx context.Context) (rule.Values, error) {
 		}
 	}
 	v := rule.Values{"status": float64(resp.StatusCode)}
-	if c.contains != "" {
+	if c.contains != "" || len(c.jsonPath) > 0 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxBody))
-		found := strings.Contains(string(body), c.contains)
-		v["body_match"] = found
-		ok = ok && found
+		if c.contains != "" {
+			found := strings.Contains(string(body), c.contains)
+			v["body_match"] = found
+			ok = ok && found
+		}
+		if len(c.jsonPath) > 0 {
+			val, found := jsonAt(body, c.jsonPath)
+			v["json_found"] = found
+			if found {
+				v["json_value"] = val
+			}
+			// With json_expect the field is part of "answering as expected", like the status and the text.
+			if c.expect != nil {
+				match := found && c.expect.Met(val)
+				v["json_match"] = match
+				ok = ok && match
+			}
+		}
 	} else {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxBody))
 	}
@@ -170,4 +198,50 @@ func shortErr(err error) string {
 		s = s[i+2:]
 	}
 	return s
+}
+
+// jsonAt reads the value at path (object keys, or list positions as numbers) in a
+// JSON document. Numbers come back as float64 and everything else as text, so a
+// condition can compare either; a missing path or a body that is not JSON is not found.
+func jsonAt(body []byte, path []string) (any, bool) {
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.UseNumber()
+	var cur any
+	if err := dec.Decode(&cur); err != nil {
+		return nil, false
+	}
+	for _, key := range path {
+		switch node := cur.(type) {
+		case map[string]any:
+			next, ok := node[key]
+			if !ok {
+				return nil, false
+			}
+			cur = next
+		case []any:
+			i, err := strconv.Atoi(key)
+			if err != nil || i < 0 || i >= len(node) {
+				return nil, false
+			}
+			cur = node[i]
+		default:
+			return nil, false
+		}
+	}
+	switch t := cur.(type) {
+	case json.Number:
+		if f, err := t.Float64(); err == nil {
+			return f, true
+		}
+		return t.String(), true
+	case string:
+		return t, true
+	case bool:
+		return strconv.FormatBool(t), true
+	case nil:
+		return "null", true
+	default:
+		out, _ := json.Marshal(t)
+		return string(out), true
+	}
 }

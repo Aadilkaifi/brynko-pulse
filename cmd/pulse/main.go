@@ -47,6 +47,8 @@ func init() {
 			usage: "validate [flags]", run: cmdValidate},
 		{name: "discover", section: "Set up", summary: "Find services, containers and ports to monitor, and suggest monitors",
 			usage: "discover [--apply] [flags]", run: cmdDiscover},
+		{name: "suggest", section: "Set up", summary: "List what a monitor could watch here: filesystems, services, containers, ports",
+			usage: "suggest [flags]", details: suggestDetails, run: cmdSuggest},
 		{name: "add", section: "Set up", summary: "Add a monitor with one command",
 			usage: "add <type> [target] [flags] [-- program args...]", details: addDetails, run: cmdAdd},
 		{name: "config", section: "Set up", summary: "Show or change the configuration, one file at a time",

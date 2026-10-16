@@ -22,6 +22,7 @@ import (
 	"github.com/Aadilkaifi/brynko-pulse/internal/alert"
 	"github.com/Aadilkaifi/brynko-pulse/internal/channel"
 	"github.com/Aadilkaifi/brynko-pulse/internal/config"
+	"github.com/Aadilkaifi/brynko-pulse/internal/duration"
 	"github.com/Aadilkaifi/brynko-pulse/internal/engine"
 	"github.com/Aadilkaifi/brynko-pulse/internal/maintenance"
 	"github.com/Aadilkaifi/brynko-pulse/internal/monitor"
@@ -183,9 +184,8 @@ func (r *runner) start(parent context.Context, cfg *config.Config) *generation {
 		m := raw.Effective(cfg.Defaults)
 		ids[m.ID] = true
 		ms := store.MonitorStatus{Name: m.DisplayName(), Type: m.Type, File: m.SourceFile,
-			Severity: m.Severity, Interval: m.Interval.D().String()}
-		if !m.IsEnabled() {
-			ms.Error = "disabled"
+			Severity: m.Severity, Interval: duration.Format(m.Interval.D()), Enabled: m.IsEnabled()}
+		if !ms.Enabled {
 			g.status[m.ID] = ms
 			continue
 		}
@@ -310,7 +310,7 @@ func (r *runner) checkOnce(ctx context.Context, g *generation, m config.Monitor,
 	} else if bad, eerr := alertC.Eval(values); eerr != nil {
 		obs.Bad, obs.Detail = true, eerr.Error()
 	} else {
-		obs.Bad, obs.Detail = bad, alertC.Describe(values)
+		obs.Bad, obs.Detail = bad, monitor.Describe(m.Type, *alertC, values)
 		if clearC != nil {
 			ok, cerr := clearC.Eval(values)
 			obs.Clear = cerr == nil && ok
@@ -338,9 +338,11 @@ func (r *runner) checkOnce(ctx context.Context, g *generation, m config.Monitor,
 	if ev == nil {
 		return
 	}
-	a := alert.Alert{Server: g.cfg.ServerName, Monitor: m.ID, MonitorName: m.DisplayName(), MonitorType: m.Type,
+	info, _ := monitor.Info(m.Type)
+	a := alert.Alert{Server: g.cfg.ServerName, ServerAddress: g.cfg.ServerAddress, Monitor: m.ID,
+		MonitorName: m.DisplayName(), MonitorType: m.Type, TypeLabel: info.Label,
 		Kind: string(ev.Kind), Severity: m.Severity, Detail: ev.Detail, Condition: alertC.Raw,
-		Since: ev.Since, At: ev.At, Duration: ev.Duration}
+		Rule: monitor.DescribeCondition(m.Type, *alertC), Since: ev.Since, At: ev.At, Duration: ev.Duration}
 	rec := store.Record{At: a.At, Kind: a.Kind, Monitor: m.ID, Name: a.MonitorName,
 		Severity: a.Severity, Detail: a.Detail, Channels: []string{}}
 	if silenced {

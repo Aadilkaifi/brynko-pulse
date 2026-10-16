@@ -6,9 +6,13 @@ Windows (amd64). Every release on the
 `.rpm` packages, the install script and a `SHA256SUMS` file to check them against.
 
 After installing, pulse runs as a background service that starts at boot. A first install also
-watches what already runs on the server: disk, memory and CPU, every running service and Docker
-container, and the web server's ports (`--no-discover` skips this). Add a channel so alerts
+sets up monitors for what already runs on the server (`--no-discover` skips this). Disk, memory, CPU
+and swap start active. Every running service and Docker container, and the web server's ports, are
+added inactive (`enabled: false`): turn on the ones that matter to you. Add a channel so alerts
 reach you: see [Channels](channels.md).
+
+You can also install and manage pulse from the brynko devOps Agent desktop app, over SSH: see
+[Using pulse from an app](ui.md).
 
 ## Linux: one command
 
@@ -105,7 +109,9 @@ again is safe: it updates the program and the service in place.
 ## Upgrade
 
 Run the install script again, install the newer package, or run the newer binary's
-`pulse install`. pulse never updates itself.
+`pulse install`. pulse never updates itself. An upgrade keeps your configuration as it is; the
+monitors for what runs on the server are only added on a first install (`pulse discover` lists
+anything new since).
 
 ## Uninstall
 
@@ -116,6 +122,16 @@ sudo pulse uninstall --purge   # also deletes config, secrets and history (asks 
 
 With a package, remove the package instead (`sudo apt remove brynko-pulse` or
 `sudo dnf remove brynko-pulse`).
+
+On Windows, in PowerShell opened with **Run as administrator**:
+
+```powershell
+& "C:\Program Files\brynko-pulse\pulse.exe" uninstall            # keeps config and history
+& "C:\Program Files\brynko-pulse\pulse.exe" uninstall --purge    # also deletes them
+```
+
+Windows does not delete a program while it runs, so `pulse.exe` itself is removed at the next
+restart; the service is gone at once.
 
 ## From source
 

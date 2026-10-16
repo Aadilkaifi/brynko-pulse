@@ -12,6 +12,7 @@ Every command that prints data accepts `--json`; that output is a versioned cont
 - [`pulse init`](#pulse-init): Create the configuration folder with a starter setup
 - [`pulse validate`](#pulse-validate): Check the configuration and explain any problems
 - [`pulse discover`](#pulse-discover): Find services, containers and ports to monitor, and suggest monitors
+- [`pulse suggest`](#pulse-suggest): List what a monitor could watch here: filesystems, services, containers, ports
 - [`pulse add`](#pulse-add): Add a monitor with one command
 - [`pulse config`](#pulse-config): Show or change the configuration, one file at a time
 - [`pulse secret`](#pulse-secret): Store or remove a secret used by channels
@@ -62,6 +63,27 @@ Flags:
     	save every suggestion as monitors/<id>.yaml
   -config string
     	configuration directory (default "/etc/brynko-pulse")
+  -json
+    	print JSON
+```
+
+### pulse suggest
+
+```text
+List what a monitor could watch here: filesystems, services, containers, ports.
+
+Usage:
+  pulse suggest [flags]
+
+Lists what this server has, so a form can offer it instead of a text box:
+  disk        filesystems that hold data, with their size and use
+  service     running services
+  container   running Docker containers
+  port        TCP ports something listens on
+
+Unlike pulse discover, it proposes no monitors and lists things already watched too.
+
+Flags:
   -json
     	print JSON
 ```

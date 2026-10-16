@@ -4,6 +4,7 @@
 package store
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,5 +57,23 @@ func TestHistoryNewestFirstAndRotation(t *testing.T) {
 	fi, _ := os.Stat(filepath.Join(dir, historyFile))
 	if fi.Size() > maxHistory {
 		t.Fatalf("history is %d bytes, over the cap", fi.Size())
+	}
+}
+
+// The JSON is a contract (api_version 1): a time that never happened is left out, and an inactive
+// monitor says enabled: false rather than reporting an error.
+func TestMonitorStatusJSON(t *testing.T) {
+	data, err := json.Marshal(MonitorStatus{Name: "nginx", Type: "service", Severity: "warning", Interval: "30s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	for _, gone := range []string{"0001-01-01", "problem_since", "last_checked", "silenced_until", "error"} {
+		if strings.Contains(s, gone) {
+			t.Errorf("%s should be left out: %s", gone, s)
+		}
+	}
+	if !strings.Contains(s, `"enabled":false`) {
+		t.Errorf("enabled must always be there: %s", s)
 	}
 }

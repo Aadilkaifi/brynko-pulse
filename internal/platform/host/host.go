@@ -58,8 +58,17 @@ type ServiceWatcher interface {
 
 // Inventory is what runs on this server, for pulse discover.
 type Inventory struct {
-	Services []string     // running services worth watching, system plumbing left out
-	Ports    []ListenPort // TCP ports something listens on
+	Services    []string     // running services worth watching, system plumbing left out
+	Ports       []ListenPort // TCP ports something listens on
+	Filesystems []Filesystem // filesystems that hold data, pseudo and system ones left out
+}
+
+// Filesystem is one mounted filesystem (a drive on Windows) a disk monitor can watch.
+type Filesystem struct {
+	Path   string // mount point, or a drive root on Windows
+	Type   string // ext4, xfs, NTFS...
+	Device string // nvme0n1p1, sdb1, or the volume label on Windows; may be empty
+	Disk   Disk
 }
 
 // ListenPort is one listening TCP socket.

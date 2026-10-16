@@ -26,6 +26,9 @@ func TestConfigShowSetDelete(t *testing.T) {
 	if code != exitOK || json.Unmarshal([]byte(out), &v) != nil || !v.Valid || len(v.Monitors) != 3 || v.Monitors[0]["file"] == "" {
 		t.Fatalf("show: %d %s", code, out)
 	}
+	if strings.Contains(out, `"server_address"`) {
+		t.Fatal("an unset server_address is left out")
+	}
 	for _, f := range v.Files {
 		if strings.Contains(f, "secrets") {
 			t.Fatal("secrets.env must never be listed")
@@ -120,5 +123,26 @@ func TestFlagsMayFollowArguments(t *testing.T) {
 	code, out, _ := runCmd("test", "monitor", "nope", "--json", "--config", dir)
 	if code != exitInvalid || !strings.Contains(out, `"ok": false`) {
 		t.Fatalf("flags after the arguments must still apply: %d %s", code, out)
+	}
+}
+
+func TestConfigShowNamesTheServer(t *testing.T) {
+	useFake(t, nil)
+	dir := initDir(t)
+	path := filepath.Join(dir, "pulse.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := strings.Replace(string(data), "version: 1\n", "version: 1\nserver_address: 203.0.113.7\n", 1)
+	if err := os.WriteFile(path, []byte(text), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	_, out, _ := runCmd("config", "show", "--json", "--config", dir)
+	var v struct {
+		Address string `json:"server_address"`
+	}
+	if json.Unmarshal([]byte(out), &v) != nil || v.Address != "203.0.113.7" {
+		t.Fatalf("server_address missing from config show: %s", out)
 	}
 }

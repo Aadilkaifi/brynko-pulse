@@ -4,6 +4,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +13,7 @@ import (
 	"os"
 
 	"github.com/Aadilkaifi/brynko-pulse/internal/config"
+	"github.com/Aadilkaifi/brynko-pulse/internal/monitor"
 	"github.com/Aadilkaifi/brynko-pulse/internal/output"
 	"github.com/Aadilkaifi/brynko-pulse/internal/platform"
 	"github.com/Aadilkaifi/brynko-pulse/internal/version"
@@ -40,11 +43,37 @@ func cmdSchema(args []string, stdout, stderr io.Writer) int {
 	if fs.Parse(reorderFlags(args)) != nil {
 		return exitUsage
 	}
-	if _, err := stdout.Write(schema.JSON); err != nil {
+	doc, err := publishedSchema()
+	if err == nil {
+		_, err = stdout.Write(doc)
+	}
+	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return exitInvalid
 	}
 	return exitOK
+}
+
+// publishedSchema is the configuration schema plus x-types: every monitor type
+// with the values its checks produce and its default condition, so a tool can
+// offer the right values for alert_when instead of free text.
+func publishedSchema() ([]byte, error) {
+	types, err := json.MarshalIndent(monitor.Catalog, "  ", "  ")
+	if err != nil {
+		return nil, err
+	}
+	const space = " \t\r\n"
+	doc := bytes.TrimRight(schema.JSON, space)
+	if len(doc) == 0 || doc[len(doc)-1] != '}' {
+		return nil, errors.New("the embedded schema is not a JSON object")
+	}
+	out := bytes.TrimRight(doc[:len(doc)-1], space)
+	out = append(append([]byte{}, out...), ",\n  \"x-types\": "...)
+	out = append(append(out, types...), "\n}\n"...)
+	if !json.Valid(out) {
+		return nil, errors.New("the published schema is not valid JSON")
+	}
+	return out, nil
 }
 
 func cmdInit(args []string, stdout, stderr io.Writer) int {

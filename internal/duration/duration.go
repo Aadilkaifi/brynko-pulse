@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -19,6 +20,18 @@ var units = map[string]time.Duration{
 }
 
 // Parse reads a duration. The empty string is zero.
+// Format writes d the way people write a duration: 15m, 1h, 1h30m, 45s, 0s (not 15m0s or 1h0m0s).
+func Format(d time.Duration) string {
+	s := d.String()
+	if strings.HasSuffix(s, "m0s") {
+		s = strings.TrimSuffix(s, "0s")
+	}
+	if strings.HasSuffix(s, "h0m") {
+		s = strings.TrimSuffix(s, "0m")
+	}
+	return s
+}
+
 func Parse(s string) (time.Duration, error) {
 	if s == "" {
 		return 0, nil

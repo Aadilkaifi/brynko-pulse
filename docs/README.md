@@ -9,6 +9,7 @@
 | [Operations](operations.md) | Day-to-day use: status, history, logs, reloading, troubleshooting |
 | [Command reference](cli.md) | Every `pulse` command and flag (generated) |
 | [Configuration reference](config-reference.md) | Every config field (generated from the schema) |
+| [Using pulse from an app](ui.md) | Managing pulse from the brynko devOps Agent desktop app |
 | [Building from source](build.md) | Building, testing, regenerating these docs, releasing |
 
 Two pages are generated from the code, so they always match the version you run:

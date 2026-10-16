@@ -65,9 +65,9 @@ type Event struct {
 // State is what the engine remembers about one monitor.
 type State struct {
 	Status       Status      `json:"status"`
-	ProblemSince time.Time   `json:"problem_since,omitempty"`
-	LastChecked  time.Time   `json:"last_checked,omitempty"`
-	LastNotified time.Time   `json:"last_notified,omitempty"`
+	ProblemSince time.Time   `json:"problem_since,omitzero"`
+	LastChecked  time.Time   `json:"last_checked,omitzero"`
+	LastNotified time.Time   `json:"last_notified,omitzero"`
 	Detail       string      `json:"detail,omitempty"`
 	Changes      []time.Time `json:"changes,omitempty"` // recent alerts and recoveries, for flapping
 	Flapping     bool        `json:"flapping,omitempty"`

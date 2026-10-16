@@ -42,6 +42,7 @@ type job struct {
 // Dispatcher is safe for concurrent use.
 type Dispatcher struct {
 	server  string
+	address string // server_address, shown beside the name
 	targets map[string]target
 	limit   int
 	log     *slog.Logger
@@ -62,7 +63,7 @@ type Dispatcher struct {
 // built are reported in Status and skipped, so one bad channel never stops the rest.
 func New(cfg *config.Config, client *http.Client, log *slog.Logger) *Dispatcher {
 	d := &Dispatcher{
-		server: cfg.ServerName, targets: map[string]target{}, limit: cfg.Limits.MaxAlertsPerMinute,
+		server: cfg.ServerName, address: cfg.ServerAddress, targets: map[string]target{}, limit: cfg.Limits.MaxAlertsPerMinute,
 		log: log, now: time.Now, queue: make(chan job, queueSize), held: map[string]int{},
 		status: map[string]store.ChannelStatus{}, retryDelay: retryDelays,
 	}
@@ -188,7 +189,7 @@ func (d *Dispatcher) flushHeld() {
 		total = max(total, n)
 	}
 	sort.Strings(ids)
-	a := alert.Alert{Server: d.server, Kind: alert.KindSummary, Severity: worst, At: d.now(),
+	a := alert.Alert{Server: d.server, ServerAddress: d.address, Kind: alert.KindSummary, Severity: worst, At: d.now(),
 		Detail: fmt.Sprintf("%d more alerts were held back in the last minute so you are not flooded. "+
 			"Run pulse status on %s to see everything that is failing.", total, d.server)}
 	d.enqueueLocked(job{a: a, ids: ids})

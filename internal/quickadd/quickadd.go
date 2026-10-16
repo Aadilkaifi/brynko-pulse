@@ -34,6 +34,7 @@ type Spec struct {
 	Days               int      // ssl: alert when fewer days are left
 	Status             int      // http: expected status code
 	Every, Grace       string   // heartbeat
+	Inactive           bool     // write enabled: false (found by discovery, turned on by the user)
 }
 
 // Result is the monitor file to write.
@@ -61,6 +62,9 @@ func Build(s Spec) (Result, error) {
 	m.add("type", s.Type)
 	if s.Name != "" {
 		m.add("name", s.Name)
+	}
+	if s.Inactive {
+		m.put("enabled", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: "false"}, false)
 	}
 
 	if !slices.Contains(Types, s.Type) {

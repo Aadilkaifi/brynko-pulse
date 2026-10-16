@@ -8,7 +8,22 @@ pulse history         # recent alerts, newest first (--limit 50 for more)
 ```
 
 `status` warns when its information is more than a minute old, which means the service is not
-running. Both accept `--json`.
+running. Monitors turned off with `enabled: false` are listed last as `INACTIVE`. Both accept
+`--json`.
+
+## JSON output
+
+Every command that prints data accepts `--json`. The output is a contract that tools can rely on:
+
+- Every answer is one JSON object with `api_version` (now `1`), `command` and `ok`; when `ok` is
+  false, `error` says why and the exit code is not 0.
+- A new `api_version` is only used for a change that would break existing readers. Fields may be
+  added within a version, so ignore the ones you do not know.
+- Fields with no value are left out: a time that never happened (no problem yet, never checked) is
+  absent rather than empty, and `config show` lists only the settings a monitor or channel has.
+- Durations are written as people write them: `30s`, `15m`, `1h30m`.
+- In `status --json`, each monitor has `enabled`; an inactive monitor is not checked and has no
+  values.
 
 ## The service
 
