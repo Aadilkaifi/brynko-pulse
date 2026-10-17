@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"reflect"
 	"sort"
 	"sync"
 	"time"
@@ -58,6 +59,9 @@ type Dispatcher struct {
 	status     map[string]store.ChannelStatus
 	retryDelay []time.Duration
 	onFail     func(Failure)
+
+	channels map[string]config.Channel // as configured, to tell an unchanged channel after a reload
+	secrets  config.Secrets
 }
 
 // Failure is an alert that could not be delivered to one channel, after every retry.
@@ -80,6 +84,7 @@ func New(cfg *config.Config, client *http.Client, log *slog.Logger) *Dispatcher 
 		server: cfg.ServerName, address: cfg.ServerAddress, targets: map[string]target{}, limit: cfg.Limits.MaxAlertsPerMinute,
 		log: log, now: time.Now, queue: make(chan job, queueSize), held: map[string]int{},
 		status: map[string]store.ChannelStatus{}, retryDelay: retryDelays,
+		channels: cfg.Channels, secrets: cfg.Secrets,
 	}
 	for id, c := range cfg.Channels {
 		st := store.ChannelStatus{Type: c.Type}
@@ -93,6 +98,27 @@ func New(cfg *config.Config, client *http.Client, log *slog.Logger) *Dispatcher 
 		d.status[id] = st
 	}
 	return d
+}
+
+// KeepStatus carries the delivery health of every channel that a reload left as it was,
+// so editing a monitor does not hide that a channel cannot deliver. A channel that
+// changed, or whose secrets may have, starts fresh.
+func (d *Dispatcher) KeepStatus(prev *Dispatcher) {
+	if prev == nil || !reflect.DeepEqual(d.secrets, prev.secrets) {
+		return
+	}
+	old := prev.Status()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for id, c := range d.channels {
+		st, was := d.status[id], old[id]
+		pc, ok := prev.channels[id]
+		if !ok || st.Unavailable != "" || !reflect.DeepEqual(c, pc) {
+			continue
+		}
+		st.LastSent, st.LastError, st.LastErrorAt = was.LastSent, was.LastError, was.LastErrorAt
+		d.status[id] = st
+	}
 }
 
 // Start runs the delivery workers and the storm summary until ctx ends.

@@ -179,6 +179,9 @@ func (r *runner) start(parent context.Context, cfg *config.Config) *generation {
 		r.o.Log.Error("maintenance windows ignored", "error", err.Error())
 	}
 	g.windows = windows
+	if prev := r.current.Load(); prev != nil {
+		g.disp.KeepStatus(prev.disp)
+	}
 	g.disp.OnFailure(r.undelivered)
 	g.disp.Start(ctx)
 

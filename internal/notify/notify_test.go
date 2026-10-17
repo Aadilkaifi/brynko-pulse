@@ -155,3 +155,36 @@ func TestFailureReportedAfterRetries(t *testing.T) {
 		t.Fatalf("tg sent %d, want 1", flaky.count())
 	}
 }
+
+// A reload keeps the last error of a channel it did not change, so the warning stays; a
+// changed channel, or changed secrets, start fresh.
+func TestReloadKeepsStatusOfUnchangedChannels(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	mail := config.Channel{Type: "webhook", URL: "https://example.invalid/a"}
+	hook := config.Channel{Type: "webhook", URL: "https://example.invalid/b"}
+	cfg := func(m, h config.Channel, sec config.Secrets) *config.Config {
+		return &config.Config{Limits: config.Limits{MaxAlertsPerMinute: 5}, Secrets: sec,
+			Channels: map[string]config.Channel{"mail": m, "hook": h}}
+	}
+	broken := func(d *Dispatcher) {
+		for _, id := range []string{"mail", "hook"} {
+			st := d.status[id]
+			st.LastError, st.LastErrorAt = "no such host", time.Now()
+			d.status[id] = st
+		}
+	}
+	prev := New(cfg(mail, hook, nil), nil, log)
+	broken(prev)
+	fixed := hook
+	fixed.URL = "https://example.invalid/c"
+	next := New(cfg(mail, fixed, nil), nil, log)
+	next.KeepStatus(prev)
+	if next.Status()["mail"].LastError != "no such host" || next.Status()["hook"].LastError != "" {
+		t.Fatalf("status = %+v", next.Status())
+	}
+	other := New(cfg(mail, hook, config.Secrets{"X": "1"}), nil, log)
+	other.KeepStatus(prev)
+	if other.Status()["mail"].LastError != "" {
+		t.Fatalf("changed secrets must start fresh: %+v", other.Status())
+	}
+}
