@@ -6,6 +6,10 @@ on:
 
 permissions:
   contents: write
+  # For the build attestations: a Sigstore certificate tied to this workflow, stored with the repo.
+  id-token: write
+  attestations: write
+  artifact-metadata: write
 
 jobs:
   build:
@@ -49,7 +53,12 @@ jobs:
           cp install.sh dist/install.sh
           (cd dist && sha256sum pulse_* brynko-pulse_* install.sh > SHA256SUMS)
 
-      # Signing SHA256SUMS is added once the signing tool is chosen.
+      # Proves each file was built here, from this repository and tag. Check with:
+      # gh attestation verify <file> --repo Aadilkaifi/brynko-pulse
+      - name: Attest build provenance
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/*
 
       - name: Draft release
         env:
