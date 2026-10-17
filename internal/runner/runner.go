@@ -108,6 +108,9 @@ func Run(ctx context.Context, o Options) error {
 
 	for {
 		gen := r.start(ctx, cfg)
+		// Report at once, not at the first tick: right after an install `pulse status` would otherwise
+		// find no state and say pulse is not running.
+		r.save()
 		o.Log.Info("pulse is running", "server", cfg.ServerName, "monitors", gen.running, "channels", len(cfg.Channels))
 		for reloaded := false; !reloaded; {
 			select {

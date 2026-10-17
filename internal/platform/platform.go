@@ -59,6 +59,8 @@ type Platform interface {
 	// RunAsService runs fn under the system service manager when that is how
 	// pulse was started, and reports whether it did.
 	RunAsService(fn host.ServiceFunc) (bool, error)
+	// StartCommand is how a person starts the installed service by hand, for messages.
+	StartCommand() string
 }
 
 // Current returns the platform this binary was built for.

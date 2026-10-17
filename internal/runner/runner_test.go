@@ -89,6 +89,35 @@ func TestRunFiresAndResolves(t *testing.T) {
 	}
 }
 
+// Right after an install, `pulse status` must find a state, not report pulse as never run until the
+// first save tick five seconds later.
+func TestRunReportsAsSoonAsItStarts(t *testing.T) {
+	cfgDir, dataDir := t.TempDir(), t.TempDir()
+	writeFiles(t, cfgDir, map[string]string{
+		"pulse.yaml":      "version: 1\nserver_name: test-box\ndefaults:\n  interval: 1h\n",
+		"monitors/m.yaml": "monitors:\n  - id: mem\n    type: memory\n    alert_when: used_percent > 99\n",
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, Options{ConfigDir: cfgDir, DataDir: dataDir, Platform: platform.Current(),
+			Log: slog.New(slog.NewTextHandler(io.Discard, nil)), SkipSecurityCheck: true, Version: "test"})
+	}()
+	defer func() { cancel(); <-done }()
+
+	deadline := time.Now().Add(2 * time.Second) // well before the first save tick (saveEvery)
+	for time.Now().Before(deadline) {
+		if snap, err := store.ReadState(dataDir); err == nil && snap != nil {
+			if _, ok := snap.Monitors["mem"]; !ok || snap.Server != "test-box" {
+				t.Fatalf("first state = %+v", snap)
+			}
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("no state %v after start; the first save came only with the %v tick", 2*time.Second, saveEvery)
+}
+
 func TestRunRefusesInvalidConfig(t *testing.T) {
 	cfgDir := t.TempDir()
 	writeFiles(t, cfgDir, map[string]string{"pulse.yaml": "version: 2\nserver_name: x\n"})

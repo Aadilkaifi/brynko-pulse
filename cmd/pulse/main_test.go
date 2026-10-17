@@ -102,7 +102,7 @@ func TestInit(t *testing.T) {
 
 func TestStatusAndHistoryWithoutState(t *testing.T) {
 	dir := t.TempDir()
-	if code, _, errOut := runCmd("status", "--data", dir); code != exitInvalid || !strings.Contains(errOut, "has not run") {
+	if code, _, errOut := runCmd("status", "--data", dir); code != exitInvalid || !strings.Contains(errOut, "has not reported yet") || !strings.Contains(errOut, "wait a few seconds") || strings.Contains(errOut, "pulse run") {
 		t.Fatalf("status: exit %d, %q", code, errOut)
 	}
 	code, out, _ := runCmd("history", "--json", "--data", dir)

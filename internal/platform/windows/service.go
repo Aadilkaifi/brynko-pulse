@@ -288,6 +288,9 @@ func (Platform) ReloadService(context.Context) (bool, error) {
 	return true, nil
 }
 
+// StartCommand is how a person starts the installed service by hand.
+func (Platform) StartCommand() string { return "Start-Service " + host.ServiceName }
+
 // RunAsService runs fn under the Service Control Manager when Windows started
 // pulse as a service. It reports false when pulse was started from a terminal.
 func (Platform) RunAsService(fn host.ServiceFunc) (bool, error) {
