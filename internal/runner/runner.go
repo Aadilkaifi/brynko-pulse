@@ -9,11 +9,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"math"
 	"math/rand/v2"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -90,12 +92,16 @@ func Run(ctx context.Context, o Options) error {
 		return err
 	}
 	saved := map[string]engine.State{}
+	var channels map[string]store.ChannelStatus
 	if snap, err := store.ReadState(o.DataDir); err == nil && snap != nil {
 		for id, m := range snap.Monitors {
 			saved[id] = m.State
 		}
+		if channelsUnchangedSince(o.ConfigDir, snap.Updated) {
+			channels = snap.Channels
+		}
 	}
-	r := &runner{o: o, st: st, eng: engine.New(saved), started: time.Now(),
+	r := &runner{o: o, st: st, eng: engine.New(saved), started: time.Now(), savedChannels: channels,
 		silences: silence.NewWatcher(o.DataDir), held: map[string]bool{},
 		heals: heal.NewTracker(cfg.Limits.MaxHealsPerHour)}
 
@@ -146,6 +152,8 @@ type runner struct {
 	held     map[string]bool // monitors with alerts held back by a silence
 
 	heals *heal.Tracker // self-healing: what it has done, across reloads
+
+	savedChannels map[string]store.ChannelStatus // delivery health from before the last stop; used once
 }
 
 // generation is everything built from one version of the configuration.
@@ -181,6 +189,9 @@ func (r *runner) start(parent context.Context, cfg *config.Config) *generation {
 	g.windows = windows
 	if prev := r.current.Load(); prev != nil {
 		g.disp.KeepStatus(prev.disp)
+	} else if r.savedChannels != nil {
+		g.disp.Restore(r.savedChannels)
+		r.savedChannels = nil
 	}
 	g.disp.OnFailure(r.undelivered)
 	g.disp.Start(ctx)
@@ -391,6 +402,25 @@ func (r *runner) checkOnce(ctx context.Context, g *generation, m config.Monitor,
 	if err := r.st.Append(rec); err != nil {
 		r.o.Log.Error("cannot write alert history", "error", err.Error())
 	}
+}
+
+// channelsUnchangedSince reports whether channels.yaml and secrets.env are as they were
+// at saved, so the channel health saved then still describes the same channels. A file
+// that does not exist has not changed.
+func channelsUnchangedSince(dir string, saved time.Time) bool {
+	if saved.IsZero() {
+		return false
+	}
+	for _, p := range []string{filepath.Join(dir, config.ChannelsFile), config.SecretsPath(dir)} {
+		fi, err := os.Stat(p)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil || !fi.ModTime().Before(saved) {
+			return false
+		}
+	}
+	return true
 }
 
 // undelivered records in the history that a channel could not deliver an alert, so the

@@ -121,6 +121,22 @@ func (d *Dispatcher) KeepStatus(prev *Dispatcher) {
 	}
 }
 
+// Restore takes the delivery health saved before pulse last stopped, for every channel
+// still of the same type, so a restart does not hide that a channel cannot deliver. The
+// caller decides the saved status still applies (the channel settings are unchanged).
+func (d *Dispatcher) Restore(saved map[string]store.ChannelStatus) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for id, st := range d.status {
+		was, ok := saved[id]
+		if !ok || st.Unavailable != "" || was.Type != st.Type {
+			continue
+		}
+		st.LastSent, st.LastError, st.LastErrorAt = was.LastSent, was.LastError, was.LastErrorAt
+		d.status[id] = st
+	}
+}
+
 // Start runs the delivery workers and the storm summary until ctx ends.
 func (d *Dispatcher) Start(ctx context.Context) {
 	for i := 0; i < workers; i++ {

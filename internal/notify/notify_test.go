@@ -188,3 +188,20 @@ func TestReloadKeepsStatusOfUnchangedChannels(t *testing.T) {
 		t.Fatalf("changed secrets must start fresh: %+v", other.Status())
 	}
 }
+
+// After a restart the saved health comes back for channels of the same type only.
+func TestRestoreSavedStatus(t *testing.T) {
+	d := New(&config.Config{Limits: config.Limits{MaxAlertsPerMinute: 5}, Channels: map[string]config.Channel{
+		"mail": {Type: "webhook", URL: "https://example.invalid/a"}, "hook": {Type: "webhook", URL: "https://example.invalid/b"}}},
+		nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	at := time.Date(2026, 10, 17, 20, 23, 32, 0, time.UTC)
+	d.Restore(map[string]store.ChannelStatus{
+		"mail": {Type: "webhook", LastError: "no such host", LastErrorAt: at},
+		"hook": {Type: "smtp", LastError: "was an email channel before"},
+		"gone": {Type: "webhook", LastError: "removed"},
+	})
+	st := d.Status()
+	if st["mail"].LastError != "no such host" || !st["mail"].LastErrorAt.Equal(at) || st["hook"].LastError != "" || len(st) != 2 {
+		t.Fatalf("status = %+v", st)
+	}
+}

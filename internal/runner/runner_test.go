@@ -247,3 +247,45 @@ func TestUndeliveredAlertIsInHistory(t *testing.T) {
 		t.Fatalf("record = %+v", got)
 	}
 }
+
+// A restart keeps a channel's last delivery error while channels.yaml and secrets.env are
+// as they were when it was saved, and starts fresh once either changed.
+func TestRestartKeepsChannelHealth(t *testing.T) {
+	for _, changed := range []bool{false, true} {
+		cfgDir, dataDir := t.TempDir(), t.TempDir()
+		writeFiles(t, cfgDir, map[string]string{
+			"pulse.yaml":      "version: 1\nserver_name: test-box\ndefaults:\n  interval: 1h\n",
+			"channels.yaml":   "channels:\n  hook:\n    type: webhook\n    url: https://example.invalid/h\n",
+			"monitors/m.yaml": "monitors:\n  - id: mem\n    type: memory\n    alert_when: used_percent > 99\n",
+		})
+		old := time.Now().Add(-time.Hour)
+		for _, f := range []string{"pulse.yaml", "channels.yaml", "monitors/m.yaml"} {
+			os.Chtimes(filepath.Join(cfgDir, filepath.FromSlash(f)), old, old)
+		}
+		st, _ := store.Open(dataDir)
+		st.Save(store.Snapshot{Server: "test-box", Updated: time.Now().Add(-time.Minute),
+			Channels: map[string]store.ChannelStatus{"hook": {Type: "webhook", LastError: "no such host",
+				LastErrorAt: time.Now().Add(-2 * time.Minute)}}})
+		if changed {
+			os.Chtimes(filepath.Join(cfgDir, "channels.yaml"), time.Now(), time.Now())
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() {
+			done <- Run(ctx, Options{ConfigDir: cfgDir, DataDir: dataDir, Platform: platform.Current(),
+				Log: slog.New(slog.NewTextHandler(io.Discard, nil)), SkipSecurityCheck: true, Version: "test"})
+		}()
+		waitFor(t, func() bool {
+			snap, err := store.ReadState(dataDir)
+			return err == nil && snap != nil && snap.PID != 0
+		})
+		cancel()
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		snap, _ := store.ReadState(dataDir)
+		if got := snap.Channels["hook"].LastError; (got == "no such host") == changed {
+			t.Fatalf("changed=%v: last error after restart = %q", changed, got)
+		}
+	}
+}
