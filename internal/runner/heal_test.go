@@ -163,6 +163,11 @@ func TestRunWaitsForApprovalThenFixes(t *testing.T) {
 	if err != nil || !ans.OK || ans.FixID != fixID {
 		t.Fatalf("approve: %+v %v", ans, err)
 	}
+	// The answer comes after the state is written: a refresh never shows the fix still waiting.
+	if snap, _ := store.ReadState(dataDir); snap == nil || snap.Monitors["backup"].Heal == nil ||
+		(snap.Monitors["backup"].Heal.Waiting != nil && !snap.Monitors["backup"].Heal.Approved) {
+		t.Fatalf("state right after the approval = %+v", snap.Monitors["backup"].Heal)
+	}
 	waitFor(t, func() bool { return len(alerts()) >= 2 })
 	last := alerts()[1]
 	if last.Kind != alert.KindHealed || !strings.Contains(last.Heal, "after your approval") {

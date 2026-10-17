@@ -559,6 +559,9 @@ func (r *runner) answerFix(req heal.Request) heal.Answer {
 		Severity: severity, Detail: fmt.Sprintf("%s: %s", verb, p.What), Channels: []string{}}); err != nil {
 		r.o.Log.Error("cannot write alert history", "error", err.Error())
 	}
+	// Written now, not at the next save tick, so a screen that refreshes after the answer
+	// no longer shows the fix as waiting.
+	r.save()
 	if nudge != nil && req.Action == heal.ActionApprove {
 		nudge()
 	}
