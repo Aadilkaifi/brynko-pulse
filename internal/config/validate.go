@@ -115,6 +115,9 @@ func merge(docs []document) (*Config, error) {
 	if cfg.Limits.CommandOutputBytes == 0 {
 		cfg.Limits.CommandOutputBytes = 64 << 10
 	}
+	if cfg.Limits.MaxHealsPerHour == 0 {
+		cfg.Limits.MaxHealsPerHour = 10
+	}
 	return cfg, nil
 }
 
@@ -366,6 +369,16 @@ func crossCheck(docs []document, secrets Secrets, r *Result) {
 						"json_expect compares the JSON field that json_path names; set json_path too"))
 				} else if _, err := rule.ParseExpect(s); err != nil {
 					r.Errors = append(r.Errors, issueAt(d, append(base, "json_expect"), "json_expect: "+err.Error()))
+				}
+			}
+			if heal, ok := mon["heal"].(map[string]any); ok && heal["action"] == HealRestart {
+				if t := mon["type"]; t != "service" && t != "container" {
+					r.Errors = append(r.Errors, issueAt(d, append(base, "heal", "action"), fmt.Sprintf(
+						"heal: restart works for service and container monitors, not %s. Use action: run with a program that fixes it", t)))
+				}
+				if _, has := heal["run"]; has {
+					r.Errors = append(r.Errors, issueAt(d, append(base, "heal", "run"),
+						"heal: run is for action: run. With action: restart, pulse restarts what the monitor watches; remove run"))
 				}
 			}
 			notify, has := mon["notify"].([]any)

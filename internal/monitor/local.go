@@ -70,31 +70,41 @@ func (b *limitedBuffer) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func (c *command) Check(ctx context.Context) (rule.Values, error) {
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+// RunProgram runs argv without a shell, as command checks and self-healing do: output is
+// capped at limit bytes, the run ends after timeout, and prepare (the platform's
+// PrepareCommand) may drop rights first. It returns the exit code and the output.
+func RunProgram(ctx context.Context, prepare func(*exec.Cmd) error, argv []string, timeout time.Duration, limit int) (int, string, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	// The argument list goes straight to the program: there is no shell to inject into.
-	cmd := exec.CommandContext(ctx, c.run[0], c.run[1:]...)
-	out := &limitedBuffer{n: c.limit}
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	out := &limitedBuffer{n: limit}
 	cmd.Stdout, cmd.Stderr = out, out
 	cmd.WaitDelay = 5 * time.Second
-	if c.prepare != nil {
-		if err := c.prepare(cmd); err != nil {
-			return nil, err
+	if prepare != nil {
+		if err := prepare(cmd); err != nil {
+			return 0, "", err
 		}
 	}
 	err := cmd.Run()
 	if ctx.Err() == context.DeadlineExceeded {
-		return nil, fmt.Errorf("%s did not finish within %v", c.run[0], c.timeout)
+		return 0, "", fmt.Errorf("%s did not finish within %v", argv[0], timeout)
 	}
 	code := 0
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
 		code = exitErr.ExitCode()
 	} else if err != nil {
-		return nil, fmt.Errorf("cannot run %s: %w", c.run[0], err)
+		return 0, "", fmt.Errorf("cannot run %s: %w", argv[0], err)
 	}
-	text := strings.TrimSpace(out.buf.String())
+	return code, strings.TrimSpace(out.buf.String()), nil
+}
+
+func (c *command) Check(ctx context.Context) (rule.Values, error) {
+	code, text, err := RunProgram(ctx, c.prepare, c.run, c.timeout, c.limit)
+	if err != nil {
+		return nil, err
+	}
 	v := rule.Values{"exit_code": float64(code)}
 	switch c.parse {
 	case "text":
@@ -198,6 +208,31 @@ func (c *container) Check(ctx context.Context) (rule.Values, error) {
 		v["health"] = info.State.Health.Status
 	}
 	return v, nil
+}
+
+// RestartContainer asks the local Docker engine to restart a container, giving it
+// 10 seconds to stop. It returns once Docker has started it again.
+func RestartContainer(ctx context.Context, name string) error {
+	if runtime.GOOS == "windows" {
+		return fmt.Errorf("restarting containers on Windows: %w yet", ErrNotAvailable)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"http://docker/containers/"+urlPathEscape(name)+"/restart?t=10", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := dockerClient(60 * time.Second).Do(req)
+	if err != nil {
+		return fmt.Errorf("cannot reach Docker (is the pulse user in the docker group?): %w", err)
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusNoContent, http.StatusOK:
+		return nil
+	case http.StatusNotFound:
+		return fmt.Errorf("container %s does not exist", name)
+	}
+	return fmt.Errorf("docker engine answered %s", resp.Status)
 }
 
 func urlPathEscape(s string) string {

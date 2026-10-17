@@ -44,6 +44,12 @@ func (unsupported) RunAsService(host.ServiceFunc) (bool, error) {
 	return false, nil
 }
 func (unsupported) StartCommand() string { return "pulse run" }
+func (unsupported) RestartService(context.Context, string) error {
+	return errOS
+}
+func (unsupported) SetHealRights(context.Context, []string) (host.HealRights, error) {
+	return host.HealRights{}, errOS
+}
 func (unsupported) Install(context.Context, host.InstallOptions) (host.InstallResult, error) {
 	return host.InstallResult{}, errOS
 }

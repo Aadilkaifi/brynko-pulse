@@ -23,7 +23,8 @@ Every command that prints data accepts `--json`. The output is a contract that t
   absent rather than empty, and `config show` lists only the settings a monitor or channel has.
 - Durations are written as people write them: `30s`, `15m`, `1h30m`.
 - In `status --json`, each monitor has `enabled`; an inactive monitor is not checked and has no
-  values.
+  values. A monitor with a heal rule also has `heal` (see [Self-healing](self-healing.md)).
+- `history` lists alerts and, as kind `heal`, every fix [self-healing](self-healing.md) tried.
 
 ## The service
 
@@ -58,4 +59,6 @@ sudo usermod -aG brynko-pulse backupuser
 | `cannot reach Docker` | pulse was installed with `--no-docker`; run `sudo pulse install` again without it |
 | A log monitor never matches | Check the service user can read the file; `sudo pulse install` warns about unreadable files |
 | `the service did not stay running` | `journalctl -u brynko-pulse -n 50` shows why |
+| `pulse is not allowed to restart this service` | Run `sudo pulse install` (Windows: `pulse install` as Administrator); it grants the right for monitors with `heal: restart` |
+| `heal: restart cannot work on this server: its polkit cannot limit a right` | The server's polkit is older than 0.106. Use `heal: run` with a program, or upgrade the system |
 | A monitor says `not running` in status | `sudo pulse validate`; the reason is in the status detail |

@@ -46,6 +46,7 @@ A monitor that changes state this many times within the window is marked flappin
 |---|---|---|---|---|
 | `command_output_bytes` | integer |  | `65536` | Output kept from a command check. |
 | `max_alerts_per_minute` | integer |  | `10` | Above this, alerts are folded into one summary message. |
+| `max_heals_per_hour` | integer |  | `10` | Self-healing attempts allowed per hour across all monitors on this server. Above this, pulse stops trying and alerts. |
 
 ### api
 
@@ -141,6 +142,7 @@ Each file has a `monitors` list. Every monitor has:
 | `cooldown` | duration (30s, 5m, 2h, 1d) |  |  | While the problem lasts, the alert is sent again this often, until it is over. Empty: the server's default (defaults.cooldown). |
 | `enabled` | boolean |  | `true` | Off keeps the monitor in its file but stops checking it. |
 | `for` | duration (30s, 5m, 2h, 1d) |  |  | How long the problem must last before you are alerted, so a short spike does not wake anyone. Empty: the server's default (defaults.for), or at once when it sets none. |
+| `heal` | [heal](#heal) |  |  |  |
 | `interval` | duration (30s, 5m, 2h, 1d) |  |  | How often pulse measures it. Types that follow events (containers, services, files, logs) also notice a change at once; this is the regular check in between. Empty: the server's default (defaults.interval). |
 | `name` | string |  |  | Shown in alerts and lists. Empty: the id. |
 | `notify` | list of channel names |  |  | Channels told about this monitor. Empty: the server's default channels (defaults.notify). |
@@ -252,3 +254,20 @@ Exactly one of `host`, `file`.
 |---|---|---|---|---|
 | `expect_every` | duration (30s, 5m, 2h, 1d) | yes |  | How often the job runs, for example 1d for a nightly job. |
 | `grace` | duration (30s, 5m, 2h, 1d) |  | `1m` | Extra time allowed before it counts as late. |
+
+## Monitor fields with their own section
+
+### heal
+
+Self-healing: what pulse does by itself when this monitor fails, a limited number of times. It waits until the problem has lasted the monitor's for (at least 30s), tries the fix, and waits verify for the monitor to be OK again. Off unless set.
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `action` | `restart` \| `run` | yes |  | restart: restart the service or container this monitor watches. run: run your own program. |
+| `attempts` | integer |  | `3` | How many tries within the window before pulse gives up and alerts. |
+| `run` | list of string |  |  | For action run: the program and its arguments. Never run through a shell. It runs as the pulse service account. |
+| `timeout` | duration (30s, 5m, 2h, 1d) |  | `90s` | How long the fix may take. |
+| `verify` | duration (30s, 5m, 2h, 1d) |  | `2m` | How long to wait after a fix for the monitor to be OK again before counting it as failed. |
+| `within` | duration (30s, 5m, 2h, 1d) |  | `1h` | The window the attempts are counted in. |
+
+`run` is required with `action: run`; `restart` works for `service` and `container` monitors. See [self-healing.md](self-healing.md).

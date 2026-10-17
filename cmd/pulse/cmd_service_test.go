@@ -24,6 +24,12 @@ type fakeService struct {
 	err         error
 	reloaded    bool
 	reloads     int
+	healRights  [][]string // every list SetHealRights was given
+}
+
+func (f *fakeService) SetHealRights(_ context.Context, services []string) (host.HealRights, error) {
+	f.healRights = append(f.healRights, services)
+	return host.HealRights{}, nil
 }
 
 func (f *fakeService) ReloadService(context.Context) (bool, error) {
@@ -158,5 +164,48 @@ func TestInstallRefusesRelativeRoot(t *testing.T) {
 	root := string(filepath.Separator)
 	if code, _, errOut := runCmd("install", "--config", root, "--data", t.TempDir()); code != exitInvalid || !strings.Contains(errOut, "root of a disk") {
 		t.Fatalf("exit %d, %q", code, errOut)
+	}
+}
+
+// The right to restart services follows the heal rules: granted for exactly the
+// services that heal by restarting, changed when the configuration changes,
+// and taken away on uninstall.
+func TestHealRightsFollowTheConfiguration(t *testing.T) {
+	f := useFake(t, nil)
+	cfg, data := filepath.Join(t.TempDir(), "cfg"), t.TempDir()
+	if code, _, errOut := runCmd("init", "--config", cfg); code != exitOK {
+		t.Fatal(errOut)
+	}
+	writeMon := func(body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(cfg, "monitors", "web.yaml"), []byte(body), 0o640); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeMon("monitors:\n" +
+		"  - id: web\n    type: service\n    service: nginx\n    heal:\n      action: restart\n" +
+		"  - id: off\n    type: service\n    service: mysql\n    enabled: false\n    heal:\n      action: restart\n" +
+		"  - id: api\n    type: container\n    container: api\n    heal:\n      action: restart\n")
+	if code, out, errOut := runCmd("install", "--config", cfg, "--data", data, "--no-discover"); code != exitOK {
+		t.Fatalf("install: %d %s %s", code, out, errOut)
+	}
+	if len(f.healRights) != 1 || strings.Join(f.healRights[0], ",") != "nginx" {
+		t.Fatalf("install granted %v, want only nginx (mysql is off, a container needs no right)", f.healRights)
+	}
+
+	stdin = strings.NewReader("monitors:\n  - id: web\n    type: service\n    service: nginx\n")
+	defer func() { stdin = os.Stdin }()
+	if code, out, errOut := runCmd("config", "set", "monitors/web.yaml", "--config", cfg); code != exitOK {
+		t.Fatalf("config set: %d %s %s", code, out, errOut)
+	}
+	if last := f.healRights[len(f.healRights)-1]; len(last) != 0 {
+		t.Fatalf("after removing the heal rule: %v, want no services", last)
+	}
+
+	if code, _, errOut := runCmd("uninstall", "--config", cfg, "--data", data); code != exitOK {
+		t.Fatal(errOut)
+	}
+	if last := f.healRights[len(f.healRights)-1]; last != nil {
+		t.Fatalf("uninstall left %v", last)
 	}
 }

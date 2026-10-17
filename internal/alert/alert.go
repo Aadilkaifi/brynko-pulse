@@ -21,6 +21,10 @@ const (
 	KindTest     = "test"
 	KindFlapping = "flapping"
 	KindSettled  = "settled"
+	// Self-healing: it failed and pulse's fix made it work again; or pulse tried
+	// as often as it may and it still fails.
+	KindHealed     = "healed"
+	KindHealFailed = "heal_failed"
 )
 
 // Alert is one notification. Its JSON form is what webhooks receive.
@@ -40,6 +44,8 @@ type Alert struct {
 	Since    time.Time     `json:"since,omitzero"`
 	At       time.Time     `json:"at"`
 	Duration time.Duration `json:"duration_ns,omitempty"`
+	// Heal says what self-healing did about it, in words, when it did something.
+	Heal string `json:"heal,omitempty"`
 }
 
 var severityRank = map[string]int{"info": 0, "warning": 1, "critical": 2}
@@ -64,6 +70,10 @@ func (a Alert) state() string {
 		return "Flapping"
 	case KindSettled:
 		return "Settled"
+	case KindHealed:
+		return "Fixed"
+	case KindHealFailed:
+		return "Could not fix"
 	}
 	if a.Severity == "" {
 		return "Alert"
@@ -76,6 +86,8 @@ func (a Alert) Headline() string {
 	switch a.Kind {
 	case KindResolved:
 		return fmt.Sprintf("%s is back to normal after %s", a.MonitorName, Human(a.Duration))
+	case KindHealed:
+		return fmt.Sprintf("%s was fixed by pulse after %s", a.MonitorName, Human(a.Duration))
 	case KindSummary, KindTest, KindFlapping, KindSettled:
 		if a.MonitorName != "" && a.Kind != KindSummary && a.Kind != KindTest {
 			return fmt.Sprintf("%s is %s", a.MonitorName, strings.ToLower(a.state()))
@@ -116,14 +128,17 @@ func (a Alert) facts() []fact {
 		}
 		out = append(out, fact{"Monitor", mon})
 	}
-	if !a.Since.IsZero() && a.Kind != KindResolved {
+	if !a.Since.IsZero() && a.Kind != KindResolved && a.Kind != KindHealed {
 		out = append(out, fact{"Started", fmt.Sprintf("%s, %s ago", a.Since.Local().Format("2 Jan 2006, 15:04 MST"),
 			Human(a.At.Sub(a.Since)))})
 	}
-	if a.Kind == KindResolved && a.Detail != "" {
+	if (a.Kind == KindResolved || a.Kind == KindHealed) && a.Detail != "" {
 		out = append(out, fact{"Now", a.Detail})
 	}
-	if a.Severity != "" && a.Kind != KindResolved && a.Kind != KindTest {
+	if a.Heal != "" {
+		out = append(out, fact{"Healing", a.Heal})
+	}
+	if a.Severity != "" && a.Kind != KindResolved && a.Kind != KindHealed && a.Kind != KindTest {
 		out = append(out, fact{"Severity", a.Severity})
 	}
 	return out
@@ -144,7 +159,7 @@ func (a Alert) Text() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s on %s\n\n%s\n", strings.ToUpper(a.state()), a.Server, a.Headline())
 	switch a.Kind {
-	case KindFiring, KindRepeat, "":
+	case KindFiring, KindRepeat, KindHealFailed, "":
 		if r := a.rule(); r != "" {
 			b.WriteString(r + "\n")
 		}
@@ -161,10 +176,12 @@ func (a Alert) Text() string {
 // colour is the band at the top of the email: the severity, or green when it is over.
 func (a Alert) colour() string {
 	switch a.Kind {
-	case KindResolved, KindSettled:
+	case KindResolved, KindSettled, KindHealed:
 		return "#1a7f37"
 	case KindTest, KindSummary:
 		return "#5f6368"
+	case KindHealFailed:
+		return "#c0392b"
 	}
 	switch a.Severity {
 	case "critical":
@@ -201,7 +218,7 @@ func (a Alert) HTML() string {
 		Facts                                       []fact
 	}{Colour: a.colour(), State: a.state(), Server: a.Server, Headline: a.Headline(), Facts: a.facts()}
 	switch a.Kind {
-	case KindFiring, KindRepeat, "":
+	case KindFiring, KindRepeat, KindHealFailed, "":
 		data.Rule = a.rule()
 	case KindFlapping, KindSettled:
 		data.Note = a.Detail

@@ -40,6 +40,16 @@ type InstallResult struct {
 	Next     []string `json:"next"` // what the user can do now, in plain words
 }
 
+// HealRights describes what SetHealRights changed, in plain words.
+type HealRights struct {
+	Steps    []string `json:"steps"`
+	Warnings []string `json:"warnings"`
+}
+
+// ErrHealNotAllowed means the service lacks the right to restart a service:
+// SetHealRights has not granted it (yet).
+var ErrHealNotAllowed = errors.New("pulse is not allowed to restart this service")
+
 // UninstallOptions controls Uninstall.
 type UninstallOptions struct {
 	ConfigDir string

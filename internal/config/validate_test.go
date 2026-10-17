@@ -96,6 +96,15 @@ func TestValidate(t *testing.T) {
 		{name: "json_expect text with >", files: base(map[string]string{"monitors/x.yaml": "monitors:\n  - id: api\n    type: http\n    url: https://api.example.com/health\n    json_path: data.status\n    json_expect: \"> ok\"\n"}), wantErr: "only be compared with == or !="},
 		{name: "json_expect without comparison", files: base(map[string]string{"monitors/x.yaml": "monitors:\n  - id: api\n    type: http\n    url: https://api.example.com/health\n    json_path: data.status\n    json_expect: ok\n"}), wantErr: "as a comparison"},
 		{name: "no channels warns", files: base(map[string]string{PulseFile: "version: 1\nserver_name: web-1\n"}), wantWarn: "alerts go nowhere"},
+		{name: "heal restart on a service", files: base(map[string]string{"monitors/x.yaml": "monitors:\n  - id: web\n    type: service\n    service: nginx\n    heal:\n      action: restart\n      attempts: 2\n      within: 30m\n      verify: 1m\n"})},
+		{name: "heal restart on a container", files: base(map[string]string{"monitors/x.yaml": "monitors:\n  - id: api\n    type: container\n    container: api\n    heal:\n      action: restart\n"})},
+		{name: "heal run", files: base(map[string]string{"monitors/x.yaml": "monitors:\n  - id: q\n    type: command\n    run: [/usr/local/bin/depth]\n    parse: number\n    alert_when: value > 10\n    heal:\n      action: run\n      run: [/usr/local/bin/drain]\n      timeout: 5m\n"})},
+		{name: "heal restart needs a service or container", files: base(map[string]string{"monitors/x.yaml": "monitors:\n  - id: m\n    type: memory\n    alert_when: used_percent > 90\n    heal:\n      action: restart\n"}), wantErr: "heal: restart works for service and container monitors, not memory"},
+		{name: "heal run needs a program", files: base(map[string]string{"monitors/x.yaml": "monitors:\n  - id: m\n    type: memory\n    alert_when: used_percent > 90\n    heal:\n      action: run\n"}), wantErr: "missing required field: run"},
+		{name: "heal restart takes no program", files: base(map[string]string{"monitors/x.yaml": "monitors:\n  - id: web\n    type: service\n    service: nginx\n    heal:\n      action: restart\n      run: [/bin/true]\n"}), wantErr: "heal: run is for action: run", wantLine: 7},
+		{name: "heal run is never a shell string", files: base(map[string]string{"monitors/x.yaml": "monitors:\n  - id: m\n    type: memory\n    alert_when: used_percent > 90\n    heal:\n      action: run\n      run: rm -rf /tmp/x\n"}), wantErr: "want array"},
+		{name: "heal attempts are bounded", files: base(map[string]string{"monitors/x.yaml": "monitors:\n  - id: web\n    type: service\n    service: nginx\n    heal:\n      action: restart\n      attempts: 50\n"}), wantErr: "maximum"},
+		{name: "heal unknown field", files: base(map[string]string{"monitors/x.yaml": "monitors:\n  - id: web\n    type: service\n    service: nginx\n    heal:\n      action: restart\n      reboot: true\n"}), wantErr: "unknown field: reboot"},
 	}
 
 	for _, tc := range tests {

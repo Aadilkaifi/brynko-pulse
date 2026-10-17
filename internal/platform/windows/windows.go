@@ -18,7 +18,6 @@ import (
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
-	"golang.org/x/sys/windows/svc/mgr"
 
 	"github.com/Aadilkaifi/brynko-pulse/internal/platform/host"
 )
@@ -152,16 +151,12 @@ func (Platform) LoadAverage() (host.Load, error) {
 
 // Service asks the Service Control Manager.
 func (Platform) Service(_ context.Context, name string) (host.Service, error) {
-	m, err := mgr.Connect()
+	// Query rights only: the service account is not an administrator (mgr.Connect would ask for full control).
+	s, done, err := openService(name, windows.SERVICE_QUERY_STATUS)
 	if err != nil {
-		return host.Service{}, fmt.Errorf("connect to the service manager: %w", err)
+		return host.Service{}, err
 	}
-	defer m.Disconnect()
-	s, err := m.OpenService(name)
-	if err != nil {
-		return host.Service{}, fmt.Errorf("service %s: %w", name, host.ErrNotFound)
-	}
-	defer s.Close()
+	defer done()
 	st, err := s.Query()
 	if err != nil {
 		return host.Service{}, fmt.Errorf("query service %s: %w", name, err)

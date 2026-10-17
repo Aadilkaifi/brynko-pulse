@@ -70,6 +70,8 @@ type Maintenance struct {
 type Limits struct {
 	MaxAlertsPerMinute int `json:"max_alerts_per_minute"`
 	CommandOutputBytes int `json:"command_output_bytes"`
+	// MaxHealsPerHour caps self-healing attempts across all monitors of the server.
+	MaxHealsPerHour int `json:"max_heals_per_hour"`
 }
 
 // API configures the local API.
@@ -145,8 +147,50 @@ type Monitor struct {
 	ExpectEvery     Duration        `json:"expect_every,omitempty"`
 	Grace           Duration        `json:"grace,omitempty"`
 
+	// Heal is what pulse does by itself when the monitor fails. Nil: nothing.
+	Heal *Heal `json:"heal,omitempty"`
+
 	// SourceFile is the config file the monitor came from, for messages.
 	SourceFile string `json:"-"`
+}
+
+// Heal actions.
+const (
+	HealRestart = "restart" // restart the service or container the monitor watches
+	HealRun     = "run"     // run a program the admin chose
+)
+
+// Heal is a fix pulse tries by itself when a monitor fails, a limited number of times.
+type Heal struct {
+	Action   string   `json:"action"`
+	Run      []string `json:"run,omitempty"`     // for HealRun: the program and its arguments, never a shell
+	Timeout  Duration `json:"timeout,omitempty"` // how long the fix may take
+	Attempts int      `json:"attempts,omitempty"`
+	Within   Duration `json:"within,omitempty"` // Attempts counts tries within this long
+	Verify   Duration `json:"verify,omitempty"` // how long to wait for the monitor to be OK again
+}
+
+// Effective returns the heal rule with defaults filled in.
+func (h Heal) Effective() Heal {
+	if h.Attempts == 0 {
+		h.Attempts = 3
+	}
+	if h.Within == 0 {
+		h.Within = Duration(time.Hour)
+	}
+	if h.Verify == 0 {
+		h.Verify = Duration(2 * time.Minute)
+	}
+	if h.Timeout == 0 {
+		h.Timeout = Duration(90 * time.Second)
+	}
+	return h
+}
+
+// HealsService reports whether a heal rule restarts a service, which needs a
+// right the service account does not have by default.
+func (m Monitor) HealsService() bool {
+	return m.IsEnabled() && m.Heal != nil && m.Heal.Action == HealRestart && m.Type == "service"
 }
 
 // LogSource names where a log monitor reads from.

@@ -155,6 +155,10 @@
         "command_output_bytes": {
           "description": "Output kept from a command check.",
           "type": "integer", "minimum": 1024, "maximum": 1048576, "default": 65536
+        },
+        "max_heals_per_hour": {
+          "description": "Self-healing attempts allowed per hour across all monitors on this server. Above this, pulse stops trying and alerts.",
+          "type": "integer", "minimum": 1, "maximum": 100, "default": 10
         }
       },
       "additionalProperties": false
@@ -258,6 +262,23 @@
       "type": "array",
       "items": { "$ref": "#/$defs/monitor" }
     },
+    "heal": {
+      "description": "Self-healing: what pulse does by itself when this monitor fails, a limited number of times. It waits until the problem has lasted the monitor's for (at least 30s), tries the fix, and waits verify for the monitor to be OK again. Off unless set.",
+      "type": "object",
+      "properties": {
+        "action": { "enum": ["restart", "run"], "description": "restart: restart the service or container this monitor watches. run: run your own program." },
+        "run": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "For action run: the program and its arguments. Never run through a shell. It runs as the pulse service account." },
+        "timeout": { "$ref": "#/$defs/duration", "default": "90s", "description": "How long the fix may take." },
+        "attempts": { "type": "integer", "minimum": 1, "maximum": 10, "default": 3, "description": "How many tries within the window before pulse gives up and alerts." },
+        "within": { "$ref": "#/$defs/duration", "default": "1h", "description": "The window the attempts are counted in." },
+        "verify": { "$ref": "#/$defs/duration", "default": "2m", "description": "How long to wait after a fix for the monitor to be OK again before counting it as failed." }
+      },
+      "required": ["action"],
+      "allOf": [
+        { "if": { "properties": { "action": { "const": "run" } } }, "then": { "required": ["run"] } }
+      ],
+      "additionalProperties": false
+    },
     "monitor": {
       "type": "object",
       "properties": {
@@ -275,7 +296,8 @@
         "for": { "$ref": "#/$defs/duration", "description": "How long the problem must last before you are alerted, so a short spike does not wake anyone. Empty: the server's default (defaults.for), or at once when it sets none." },
         "severity": { "$ref": "#/$defs/severity", "description": "How serious an alert is. Empty: the server's default (defaults.severity)." },
         "notify": { "$ref": "#/$defs/notifyList", "description": "Channels told about this monitor. Empty: the server's default channels (defaults.notify)." },
-        "cooldown": { "$ref": "#/$defs/duration", "description": "While the problem lasts, the alert is sent again this often, until it is over. Empty: the server's default (defaults.cooldown)." }
+        "cooldown": { "$ref": "#/$defs/duration", "description": "While the problem lasts, the alert is sent again this often, until it is over. Empty: the server's default (defaults.cooldown)." },
+        "heal": { "$ref": "#/$defs/heal" }
       },
       "required": ["id", "type"],
       "allOf": [

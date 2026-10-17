@@ -18,6 +18,7 @@ import (
 
 	"github.com/Aadilkaifi/brynko-pulse/internal/config"
 	"github.com/Aadilkaifi/brynko-pulse/internal/platform"
+	"github.com/Aadilkaifi/brynko-pulse/internal/platform/host"
 	"github.com/Aadilkaifi/brynko-pulse/internal/rule"
 )
 
@@ -124,8 +125,15 @@ func readInput() ([]byte, error) {
 // finishChange reloads the running service after a successful change and reports.
 func finishChange(p platform.Platform, command, target, verb string, res config.Result, err error, asJSON bool, stdout, stderr io.Writer) int {
 	saved, reloaded := err == nil, false
+	var heal *host.HealRights
 	if err == nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		// A heal rule added or removed changes which services pulse may restart.
+		if cfg, _ := config.Load(res.Dir); cfg != nil {
+			if hr := setHealRights(ctx, p, cfg); len(hr.Steps)+len(hr.Warnings) > 0 {
+				heal = &hr
+			}
+		}
 		reloaded, err = p.ReloadService(ctx)
 		cancel()
 		if err != nil {
@@ -135,15 +143,24 @@ func finishChange(p platform.Platform, command, target, verb string, res config.
 	if asJSON {
 		return finishJSON(stdout, stderr, struct {
 			envelope
-			Target   string         `json:"target"`
-			Saved    bool           `json:"saved"`
-			Reloaded bool           `json:"reloaded"`
-			Errors   []config.Issue `json:"errors"`
-			Warnings []config.Issue `json:"warnings"`
-		}{newEnvelope(command, err), target, saved, reloaded, nonNil(res.Errors), nonNil(res.Warnings)}, err)
+			Target   string           `json:"target"`
+			Saved    bool             `json:"saved"`
+			Reloaded bool             `json:"reloaded"`
+			Errors   []config.Issue   `json:"errors"`
+			Warnings []config.Issue   `json:"warnings"`
+			Heal     *host.HealRights `json:"heal,omitempty"`
+		}{newEnvelope(command, err), target, saved, reloaded, nonNil(res.Errors), nonNil(res.Warnings), heal}, err)
 	}
 	for _, is := range res.Errors {
 		fmt.Fprintf(stdout, "error    %s\n", formatIssue(is))
+	}
+	if heal != nil {
+		for _, s := range heal.Steps {
+			fmt.Fprintf(stdout, "  done  %s\n", s)
+		}
+		for _, w := range heal.Warnings {
+			fmt.Fprintf(stdout, "warning  %s\n", w)
+		}
 	}
 	if err != nil {
 		fmt.Fprintln(stderr, err)

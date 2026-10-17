@@ -131,7 +131,35 @@ func install(p platform.Platform, cfgDir, dataDir string, allowDocker, discoverN
 	defer cancel()
 	opts.Source = src
 	res, err := p.Install(ctx, opts)
+	if err == nil {
+		hr := setHealRights(ctx, p, cfg)
+		res.Steps = append(res.Steps, hr.Steps...)
+		res.Warnings = append(res.Warnings, hr.Warnings...)
+	}
 	return res, initRes, added, err
+}
+
+// healServices lists the services monitors restart for self-healing.
+func healServices(cfg *config.Config) []string {
+	var out []string
+	for _, m := range cfg.Monitors {
+		if m.HealsService() {
+			out = append(out, m.Service)
+		}
+	}
+	return out
+}
+
+// setHealRights lets the service restart exactly the services the configuration
+// heals, and no others. A failure is a warning: monitoring works without it.
+func setHealRights(ctx context.Context, p platform.Platform, cfg *config.Config) host.HealRights {
+	services := healServices(cfg)
+	hr, err := p.SetHealRights(ctx, services)
+	if err != nil && len(services) > 0 {
+		hr.Warnings = append(hr.Warnings, fmt.Sprintf(
+			"self-healing cannot restart %s yet: %v. Run this again as root or Administrator.", strings.Join(services, ", "), err))
+	}
+	return hr
 }
 
 func cmdUninstall(args []string, stdout, stderr io.Writer) int {
@@ -193,6 +221,10 @@ func uninstall(p platform.Platform, cfgDir, dataDir string, purge, yes, asJSON b
 
 	ctx, cancel := signalContext(installTimeout)
 	defer cancel()
+	// The right to restart services goes with the service.
+	if hr, err := p.SetHealRights(ctx, nil); err == nil {
+		steps = append(steps, hr.Steps...)
+	}
 	res, err := p.Uninstall(ctx, host.UninstallOptions{ConfigDir: cfgDir, DataDir: dataDir, Purge: purge})
 	steps = append(steps, res.Steps...)
 	if err != nil || !purge {

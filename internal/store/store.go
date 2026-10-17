@@ -44,6 +44,19 @@ type MonitorStatus struct {
 
 	SilencedUntil time.Time `json:"silenced_until,omitzero"`
 	SilenceReason string    `json:"silence_reason,omitempty"`
+
+	Heal *HealStatus `json:"heal,omitempty"` // set when the monitor has a heal rule
+}
+
+// HealStatus is what self-healing has done for one monitor.
+type HealStatus struct {
+	Action       string    `json:"action"`        // restart or run
+	Attempts     int       `json:"attempts"`      // allowed within the window
+	AttemptsUsed int       `json:"attempts_used"` // tries within the window
+	Healing      bool      `json:"healing,omitempty"`
+	GaveUp       bool      `json:"gave_up,omitempty"`
+	LastAt       time.Time `json:"last_at,omitzero"`
+	LastResult   string    `json:"last_result,omitempty"`
 }
 
 // ChannelStatus is the delivery health of one channel.

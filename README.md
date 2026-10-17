@@ -17,6 +17,8 @@ WhatsApp (your own Meta account), Telegram, Slack or any webhook.
 - **Quiet when it should be.** Alerts wait for a problem to last, recover with a margin, catch
   flapping, and fold storms into one message, so you trust the ones you get.
 - **Fast.** Service, container, file and log changes are noticed as they happen.
+- **Fixes what it can.** With [self-healing](docs/self-healing.md), pulse restarts a failed service
+  or container, or runs your own fix, a limited number of times, and tells you what it did.
 
 ## Install
 
@@ -69,6 +71,7 @@ The same app also works with your containers, databases, files and deploy script
 | [Configuration](docs/configuration.md) | Files, secrets, conditions, silences, maintenance windows |
 | [Monitors](docs/monitors.md) | Disk, memory, CPU, services, containers, ports, websites, certificates, logs, files, commands, heartbeats |
 | [Channels](docs/channels.md) | Email, WhatsApp, Telegram, Slack, webhook |
+| [Self-healing](docs/self-healing.md) | Restart a failed service or container, or run your own fix |
 | [Operations](docs/operations.md) | Status, history, logs, troubleshooting |
 | [Command reference](docs/cli.md) | Every command and flag |
 | [Configuration reference](docs/config-reference.md) | Every config field |
