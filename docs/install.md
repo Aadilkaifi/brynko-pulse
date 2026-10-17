@@ -1,34 +1,100 @@
 # Install
 
-pulse is one program, `pulse`, with no runtime to install. It runs on Linux (amd64, arm64) and
-Windows (amd64). Every release on the
-[releases page](https://github.com/Aadilkaifi/brynko-pulse/releases) has the binaries, `.deb` and
-`.rpm` packages, the install script and a `SHA256SUMS` file to check them against.
+Copy one command, run it, and pulse is watching the server. It starts again after every reboot.
 
-After installing, pulse runs as a background service that starts at boot. A first install also
-sets up monitors for what already runs on the server (`--no-discover` skips this). Disk, memory, CPU
-and swap start active. Every running service and Docker container, and the web server's ports, are
-added inactive (`enabled: false`): turn on the ones that matter to you. Add a channel so alerts
-reach you: see [Channels](channels.md).
+## Linux
 
-You can also install and manage pulse from the brynko devOps Agent desktop app, over SSH: see
-[Using pulse from an app](ui.md).
-
-## Linux: one command
+Run this on the server (Ubuntu, Debian, RHEL, Rocky, Alma, Fedora and others; Intel/AMD or ARM):
 
 ```sh
 curl -fsSL https://github.com/Aadilkaifi/brynko-pulse/releases/latest/download/install.sh | sudo sh
 ```
 
-The script:
+Check it is running:
 
-1. finds your CPU type and package manager,
-2. downloads the matching package from the latest release and its `SHA256SUMS`,
-3. stops if the checksum does not match,
-4. installs the `.deb` (apt), the `.rpm` (dnf or yum), or else the plain binary,
-5. runs `pulse install`, which creates the configuration and starts the service.
+```sh
+sudo pulse status
+```
 
-To read the script before running it, download it first:
+## Windows
+
+Open **PowerShell** with **Run as administrator** (right-click PowerShell, *Run as administrator*),
+paste this whole block and press Enter:
+
+```powershell
+& {
+  $ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'
+  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+  $v    = (Invoke-RestMethod https://api.github.com/repos/Aadilkaifi/brynko-pulse/releases/latest).tag_name
+  $base = "https://github.com/Aadilkaifi/brynko-pulse/releases/download/$v"
+  $exe  = "$env:TEMP\pulse_${v}_windows_amd64.exe"; $sums = "$env:TEMP\pulse_SHA256SUMS"
+  Invoke-WebRequest "$base/pulse_${v}_windows_amd64.exe" -OutFile $exe -UseBasicParsing
+  Invoke-WebRequest "$base/SHA256SUMS" -OutFile $sums -UseBasicParsing
+  $want = ((Select-String -Path $sums -Pattern "pulse_${v}_windows_amd64.exe").Line -split '\s+')[0]
+  if ((Get-FileHash $exe -Algorithm SHA256).Hash -ne $want) { throw "Checksum mismatch. Nothing was installed." }
+  & $exe install
+  Remove-Item $exe, $sums
+}
+```
+
+Check it is running:
+
+```powershell
+& "C:\Program Files\brynko-pulse\pulse.exe" status
+```
+
+Both commands download the latest release, check it against the release's `SHA256SUMS`, stop if it
+does not match, and install pulse as a service.
+
+## Next: get the alerts
+
+pulse is now watching disk, memory, CPU and swap, but it has nowhere to send alerts yet. Add a
+channel (email, WhatsApp, Telegram, Slack or webhook) as shown in [Channels](channels.md), then
+send yourself a test alert.
+
+It has also listed the services, Docker containers and web ports it found, switched off. Turn on
+the ones that matter to you: see [Monitors](monitors.md) and [Configuration](configuration.md).
+
+Prefer clicking to editing files? The brynko devOps Agent desktop app installs and manages pulse
+over SSH: see [Using pulse from an app](ui.md).
+
+## Upgrade
+
+Run the same install command again. It replaces the program and keeps your monitors, channels,
+secrets and history. pulse never updates itself.
+
+New services or containers since the first install are not added on their own; `sudo pulse
+discover` lists them.
+
+## Uninstall
+
+Linux:
+
+```sh
+sudo pulse uninstall           # removes the service and program, keeps config and history
+sudo pulse uninstall --purge   # also deletes config, secrets and history (asks you to type "delete")
+```
+
+Installed from a package? Remove the package instead: `sudo apt remove brynko-pulse` or
+`sudo dnf remove brynko-pulse`.
+
+Windows, in PowerShell with **Run as administrator**:
+
+```powershell
+& "C:\Program Files\brynko-pulse\pulse.exe" uninstall            # keeps config and history
+& "C:\Program Files\brynko-pulse\pulse.exe" uninstall --purge    # also deletes them
+```
+
+The service is gone at once. Windows does not delete a running program, so `pulse.exe` itself is
+removed at the next restart.
+
+## Other ways to install
+
+Everything below is optional. Each release on the
+[releases page](https://github.com/Aadilkaifi/brynko-pulse/releases) has the programs, `.deb` and
+`.rpm` packages, the install script and `SHA256SUMS`.
+
+### Read the Linux script before running it
 
 ```sh
 curl -fsSLO https://github.com/Aadilkaifi/brynko-pulse/releases/latest/download/install.sh
@@ -36,51 +102,66 @@ less install.sh
 sudo sh install.sh
 ```
 
-Set `PULSE_VERSION=v1.2.3` to install a specific release instead of the latest.
+The script finds your CPU type and package manager, downloads the matching package and
+`SHA256SUMS`, stops if the checksum does not match, installs the `.deb` (apt), the `.rpm` (dnf or
+yum) or else the plain program, and runs `pulse install`.
 
-## Linux: package
-
-Download the package for your CPU (`amd64` for most servers, `arm64` for ARM such as AWS Graviton;
-`uname -m` tells you) and install it:
+To install a specific release instead of the latest, set `PULSE_VERSION`:
 
 ```sh
-sudo apt install ./brynko-pulse_<version>_linux_amd64.deb    # Debian, Ubuntu
-sudo dnf install ./brynko-pulse_<version>_linux_amd64.rpm     # Fedora, RHEL, Rocky, Alma
+curl -fsSL https://github.com/Aadilkaifi/brynko-pulse/releases/latest/download/install.sh | sudo PULSE_VERSION=v0.1.1 sh
 ```
 
-The package puts `pulse` in `/usr/bin` and runs `pulse install` for you. Removing the package
-(`sudo apt remove brynko-pulse`) stops and removes the service and keeps your configuration.
+### Linux package
 
-## Linux: plain binary
+Download the package for your CPU from the releases page (`amd64` for most servers, `arm64` for ARM
+such as AWS Graviton; `uname -m` tells you) and install it:
 
 ```sh
-curl -fsSLO https://github.com/Aadilkaifi/brynko-pulse/releases/download/<version>/pulse_<version>_linux_amd64
-curl -fsSLO https://github.com/Aadilkaifi/brynko-pulse/releases/download/<version>/SHA256SUMS
+sudo apt install ./brynko-pulse_v0.1.1_linux_amd64.deb    # Debian, Ubuntu
+sudo dnf install ./brynko-pulse_v0.1.1_linux_amd64.rpm     # Fedora, RHEL, Rocky, Alma
+```
+
+The package puts `pulse` in `/usr/bin` and runs `pulse install` for you.
+
+### Linux program only
+
+```sh
+curl -fsSLO https://github.com/Aadilkaifi/brynko-pulse/releases/download/v0.1.1/pulse_v0.1.1_linux_amd64
+curl -fsSLO https://github.com/Aadilkaifi/brynko-pulse/releases/download/v0.1.1/SHA256SUMS
 sha256sum --check --ignore-missing SHA256SUMS
-chmod +x pulse_<version>_linux_amd64
-sudo ./pulse_<version>_linux_amd64 install
+chmod +x pulse_v0.1.1_linux_amd64
+sudo ./pulse_v0.1.1_linux_amd64 install
 ```
 
 `pulse install` copies itself to `/usr/local/bin/pulse`, so you can delete the downloaded file
 afterwards.
 
-## Windows
+### Windows by hand
 
-1. Download `pulse_<version>_windows_amd64.exe` and `SHA256SUMS` from the releases page.
-2. Check the file in PowerShell; the two values must match:
+1. Download `pulse_v0.1.1_windows_amd64.exe` and `SHA256SUMS` from the releases page.
+2. In PowerShell, check the file; the two values must match:
    ```powershell
-   (Get-FileHash .\pulse_<version>_windows_amd64.exe -Algorithm SHA256).Hash
+   (Get-FileHash .\pulse_v0.1.1_windows_amd64.exe -Algorithm SHA256).Hash
    Select-String windows_amd64.exe .\SHA256SUMS
    ```
-3. Open PowerShell with **Run as administrator** and run:
+3. In PowerShell with **Run as administrator**:
    ```powershell
-   .\pulse_<version>_windows_amd64.exe install
+   .\pulse_v0.1.1_windows_amd64.exe install
    ```
 
-`pulse install` copies itself to `C:\Program Files\brynko-pulse\pulse.exe` and registers the
-`brynko-pulse` Windows Service. The binary is not code-signed yet, so Windows SmartScreen may warn
-when you run a file downloaded with a browser; the checksum step above is how you know the file is
-genuine.
+The program is not code-signed yet, so Windows SmartScreen may warn about a file downloaded with a
+browser; the checksum is how you know the file is genuine.
+
+### Install options
+
+`pulse install` takes two options:
+
+- `--no-discover`: do not add monitors for the services, containers and ports found on the server
+  (they are added switched off anyway). Works on a first install with the program-only and Windows
+  methods, for example `sudo ./pulse_v0.1.1_linux_amd64 install --no-discover`.
+- `--no-docker`: do not give the service access to Docker (see below). After any install, run
+  `sudo pulse install --no-docker` to take that access away again.
 
 ## What install sets up
 
@@ -102,36 +183,9 @@ again is safe: it updates the program and the service in place.
   monitors work. pulse only reads container state and events, but membership of that group is
   equivalent to root. If you do not want that, install with `--no-docker`; running install again
   with or without the flag adds or removes the access.
-- Journal log monitors need to read the systemd journal. Install adds the service user to the
-  `systemd-journal` group when such a monitor exists, and removes it when none is left.
+- **Journal:** log monitors that read the systemd journal need the `systemd-journal` group. Install
+  adds the service user to it when such a monitor exists, and removes it when none is left.
 - Log files that the service user cannot read are listed as warnings by install.
-
-## Upgrade
-
-Run the install script again, install the newer package, or run the newer binary's
-`pulse install`. pulse never updates itself. An upgrade keeps your configuration as it is; the
-monitors for what runs on the server are only added on a first install (`pulse discover` lists
-anything new since).
-
-## Uninstall
-
-```sh
-sudo pulse uninstall           # stops and removes the service and program, keeps config and history
-sudo pulse uninstall --purge   # also deletes config, secrets and history (asks you to type "delete")
-```
-
-With a package, remove the package instead (`sudo apt remove brynko-pulse` or
-`sudo dnf remove brynko-pulse`).
-
-On Windows, in PowerShell opened with **Run as administrator**:
-
-```powershell
-& "C:\Program Files\brynko-pulse\pulse.exe" uninstall            # keeps config and history
-& "C:\Program Files\brynko-pulse\pulse.exe" uninstall --purge    # also deletes them
-```
-
-Windows does not delete a program while it runs, so `pulse.exe` itself is removed at the next
-restart; the service is gone at once.
 
 ## From source
 
