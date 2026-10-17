@@ -223,3 +223,84 @@ func TestPlanFor(t *testing.T) {
 		t.Fatal("a monitor that is off has no plan")
 	}
 }
+
+// Bug scan 2026-10-17: a missing right belongs to one problem. Once an admin grants it,
+// the next problem is tried again instead of being given up at once.
+func TestAMissingRightDoesNotStickToTheNextProblem(t *testing.T) {
+	s := newSim(t)
+	s.check(t0, true, "")
+	s.check(t0.Add(30*time.Second), true, "")
+	s.done(t0.Add(31*time.Second), errors.New("pulse is not allowed to restart this service: nginx"))
+	s.check(t0.Add(32*time.Second), true, "") // gives up
+	s.check(t0.Add(time.Minute), false, "")   // it works again (someone fixed it by hand)
+	s.check(t0.Add(10*time.Minute), true, "")
+	if st := s.check(t0.Add(11*time.Minute), true, ""); !st.Start {
+		t.Fatalf("new problem after the right was granted: %+v, want a new try", st)
+	}
+}
+
+// Bug scan: a reminder that is due while a fix runs, after the alert went out, is sent.
+func TestAReminderDuringAFixIsNotSwallowed(t *testing.T) {
+	s := newSim(t)
+	s.check(t0, true, "")
+	s.check(t0.Add(30*time.Second), true, "")
+	s.done(t0.Add(31*time.Second), nil)
+	s.check(t0.Add(31*time.Second+2*time.Minute), true, "") // second try: the alert goes out now
+	remind := &engine.Event{Kind: engine.EventFiring, Monitor: "web", Detail: "Still failing after the silence ended. stopped", At: t0.Add(3 * time.Minute)}
+	st := s.tr.Step("web", s.p, t0.Add(3*time.Minute), s.eng.Get("web"), remind, "")
+	if st.Send != remind || !strings.Contains(st.Note, "pulse is trying to restart nginx") {
+		t.Fatalf("reminder while fixing: %+v", st)
+	}
+}
+
+// Bug scan: a flapping notice is not replaced by the held failure it describes.
+func TestAFlappingNoticeWinsOverAHeldFailure(t *testing.T) {
+	s := newSim(t)
+	s.check(t0, true, "") // held
+	flap := &engine.Event{Kind: engine.EventFlapping, Monitor: "web", Detail: "It changed between failing and recovered 5 times", At: t0.Add(5 * time.Second)}
+	st := s.tr.Step("web", s.p, t0.Add(5*time.Second), s.eng.Get("web"), flap, "it keeps switching between failing and working")
+	if st.Send != flap || st.Start {
+		t.Fatalf("flapping: %+v, want the flapping notice and no fix", st)
+	}
+}
+
+// Bug scan: a recovery the engine did not announce (it was flapping) still ends the problem,
+// so the next problem starts clean instead of reusing the old held alert.
+func TestAnUnannouncedRecoveryEndsTheProblem(t *testing.T) {
+	s := newSim(t)
+	s.check(t0, true, "") // held, detail "stopped"
+	ok := engine.State{Status: engine.OK, LastChecked: t0.Add(10 * time.Second)}
+	s.tr.Step("web", s.p, t0.Add(10*time.Second), ok, nil, "")
+	if got := s.tr.Take("web"); got != nil {
+		t.Fatalf("the old held alert survived the recovery: %+v", got)
+	}
+}
+
+// Bug scan: when a heal rule is removed while its alert is held, the alert is handed back.
+func TestTakeReturnsAHeldAlert(t *testing.T) {
+	s := newSim(t)
+	s.check(t0, true, "")
+	if got := s.tr.Take("web"); got == nil || got.Kind != engine.EventFiring {
+		t.Fatalf("take = %+v, want the held firing alert", got)
+	}
+	if got := s.tr.Take("web"); got != nil {
+		t.Fatal("take must forget the monitor")
+	}
+}
+
+// Bug scan: a problem that started before pulse did (pulse restarted) was already reported:
+// a fix that works then is an ordinary resolved message, not "it failed ... fixed".
+func TestAProblemFromBeforeARestartIsNotCalledFixedOutOfTheBlue(t *testing.T) {
+	tr := NewTracker(10)
+	p := plan()
+	firing := engine.State{Status: engine.Firing, ProblemSince: t0.Add(-time.Hour), Detail: "stopped"}
+	if st := tr.Step("web", p, t0, firing, nil, ""); !st.Start {
+		t.Fatalf("after a restart: %+v, want a try", st)
+	}
+	tr.Done("web", Outcome{At: t0.Add(time.Second)}, p.Verify)
+	resolved := &engine.Event{Kind: engine.EventResolved, Monitor: "web", Detail: "running", At: t0.Add(10 * time.Second)}
+	st := tr.Step("web", p, t0.Add(10*time.Second), engine.State{Status: engine.OK}, resolved, "")
+	if st.Kind != "" || st.Send != resolved || !strings.Contains(st.Note, "pulse restarted nginx at") {
+		t.Fatalf("resolved: %+v", st)
+	}
+}

@@ -54,6 +54,9 @@ func (Platform) RestartService(ctx context.Context, name string) error {
 			de.Name == "org.freedesktop.DBus.Error.InteractiveAuthorizationRequired") {
 			return fmt.Errorf("%w: %s. Run sudo pulse install, which grants it for monitors with heal: restart", host.ErrHealNotAllowed, name)
 		}
+		if errors.As(err, &de) && (de.Name == "org.freedesktop.systemd1.NoSuchUnit" || de.Name == "org.freedesktop.systemd1.LoadFailed") {
+			return fmt.Errorf("service %s: %w", name, host.ErrNotFound)
+		}
 		return fmt.Errorf("restart %s: %w", name, err)
 	}
 	// The job object exists until the restart is done (or has failed).

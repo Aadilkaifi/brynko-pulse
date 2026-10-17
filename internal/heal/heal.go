@@ -92,6 +92,7 @@ type state struct {
 	held         *engine.Event // the problem's first alert, held back while pulse tries
 	sent         bool          // the problem's alert has gone out
 	gaveUp       bool
+	fatal        bool // this problem's fix cannot work (such as a missing right)
 	last         *Outcome
 }
 
@@ -137,6 +138,9 @@ func (t *Tracker) Step(id string, p Plan, now time.Time, st engine.State, ev *en
 
 	if st.Status != engine.Firing {
 		if ev == nil || ev.Kind != engine.EventResolved {
+			if st.Status == engine.OK && (s.held != nil || s.problemTries > 0) {
+				s.endProblem() // it works again, unannounced because it was flapping
+			}
 			return Step{Send: ev}
 		}
 		defer s.endProblem()
@@ -157,11 +161,18 @@ func (t *Tracker) Step(id string, p Plan, now time.Time, st engine.State, ev *en
 		return Step{Send: ev}
 	}
 
-	if ev != nil && ev.Kind == engine.EventFiring && !s.sent && s.held == nil {
+	switch {
+	case ev != nil && ev.Kind == engine.EventFiring && !s.sent && s.held == nil:
 		s.held = ev // nobody hears about it until pulse has tried
 		ev = nil
+	case ev == nil && !s.sent && s.held == nil && s.problemTries == 0:
+		s.sent = true // failing since before pulse started: its alert went out then
 	}
 	if s.running || now.Before(s.verifyUntil) {
+		if s.sent && ev != nil {
+			// Already reported: a reminder (repeat, silence over) still goes out.
+			return Step{Send: ev, Note: fmt.Sprintf("pulse is trying to %s.", p.What)}
+		}
 		return Step{} // a fix is in progress or settling: wait
 	}
 	if s.gaveUp {
@@ -170,7 +181,7 @@ func (t *Tracker) Step(id string, p Plan, now time.Time, st engine.State, ev *en
 	if blocked != "" {
 		return s.release(ev, "pulse did not try to fix it: "+blocked+".")
 	}
-	if s.last != nil && s.last.Fatal {
+	if s.fatal {
 		s.gaveUp = true
 		out := s.release(ev, fmt.Sprintf("pulse could not %s: %v. It stops trying until this works again.", p.What, s.last.Err))
 		out.Kind = alert.KindHealFailed
@@ -200,13 +211,33 @@ func (t *Tracker) Step(id string, p Plan, now time.Time, st engine.State, ev *en
 	s.tries = append(s.tries, now)
 	t.global = append(t.global, now)
 	out := Step{Start: true, Attempt: used + 1}
-	if s.problemTries > 1 && !s.sent && s.held != nil {
+	switch {
+	case s.problemTries > 1 && !s.sent && s.held != nil:
 		// The first fix did not help: tell people now, and try again.
 		out.Send, out.Note = s.held, fmt.Sprintf("pulse %s at %s but it still fails, so it tries again (%d of %d).",
 			p.Done, clock(s.lastAt(now)), used+1, p.Attempts)
 		s.sent, s.held = true, nil
+	case ev != nil:
+		out.Send, out.Note = ev, fmt.Sprintf("pulse is trying to %s (%d of %d).", p.What, used+1, p.Attempts)
+		s.sent = true
 	}
 	return out
+}
+
+// Take forgets a monitor that no longer has a heal rule and returns its alert if it was
+// held back and never sent, so the runner sends it after all.
+func (t *Tracker) Take(id string) *engine.Event {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	s, ok := t.mons[id]
+	if !ok {
+		return nil
+	}
+	delete(t.mons, id)
+	if !s.sent && s.held != nil {
+		return s.held
+	}
+	return nil
 }
 
 // Done records the result of a fix: pulse then waits verify for the monitor to work.
@@ -219,6 +250,7 @@ func (t *Tracker) Done(id string, o Outcome, verify time.Duration) {
 	if !wasRunning {
 		return // the problem ended while the fix ran: nothing to wait for
 	}
+	s.fatal = o.Fatal
 	s.verifyUntil = o.At
 	if o.Err == nil {
 		s.verifyUntil = o.At.Add(verify)
@@ -248,6 +280,10 @@ func Describe(p Plan, o Outcome) string {
 
 // release sends the held first alert, or else ev, with a note.
 func (s *state) release(ev *engine.Event, note string) Step {
+	if ev != nil && ev.Kind != engine.EventFiring && ev.Kind != engine.EventRepeat {
+		s.sent, s.held = true, nil // such as flapping: it says more than the held failure
+		return Step{Send: ev, Note: note}
+	}
 	if !s.sent && s.held != nil {
 		held := s.held
 		s.sent, s.held = true, nil
@@ -269,7 +305,7 @@ func (o Step) orNow(id string, st engine.State, now time.Time) Step {
 }
 
 func (s *state) endProblem() {
-	s.problemTries, s.running, s.held, s.sent, s.gaveUp = 0, false, nil, false, false
+	s.problemTries, s.running, s.held, s.sent, s.gaveUp, s.fatal = 0, false, nil, false, false, false
 	s.verifyUntil = time.Time{}
 }
 

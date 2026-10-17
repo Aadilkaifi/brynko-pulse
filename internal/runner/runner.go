@@ -356,6 +356,8 @@ func (r *runner) checkOnce(ctx context.Context, g *generation, m config.Monitor,
 	if p, ok := g.plans[m.ID]; ok {
 		hs = r.healStep(ctx, g, m, p, now, ev, nudge)
 		ev = hs.Send
+	} else if held := r.heals.Take(m.ID); held != nil && ev == nil {
+		ev = held // its heal rule was removed while its alert was held back
 	}
 	if ev == nil {
 		return
@@ -373,7 +375,7 @@ func (r *runner) checkOnce(ctx context.Context, g *generation, m config.Monitor,
 		Kind: kind, Severity: severity, Detail: ev.Detail, Condition: alertC.Raw, Heal: hs.Note,
 		Rule: monitor.DescribeCondition(m.Type, *alertC), Since: ev.Since, At: ev.At, Duration: ev.Duration}
 	rec := store.Record{At: a.At, Kind: a.Kind, Monitor: m.ID, Name: a.MonitorName,
-		Severity: a.Severity, Detail: a.Detail, Channels: []string{}}
+		Severity: a.Severity, Detail: historyDetail(a), Channels: []string{}}
 	if silenced {
 		r.hold(m.ID)
 		rec.Silenced = true
@@ -385,6 +387,18 @@ func (r *runner) checkOnce(ctx context.Context, g *generation, m config.Monitor,
 	if err := r.st.Append(rec); err != nil {
 		r.o.Log.Error("cannot write alert history", "error", err.Error())
 	}
+}
+
+// historyDetail is the alert's line in the history: with self-healing, what pulse did,
+// since "Fixed" alone says less than "it failed, pulse restarted it, it works again".
+func historyDetail(a alert.Alert) string {
+	switch {
+	case a.Heal == "":
+		return a.Detail
+	case a.Kind == alert.KindHealed:
+		return a.Heal
+	}
+	return strings.TrimSuffix(a.Detail, ".") + ". " + a.Heal
 }
 
 // healStep asks the tracker what self-healing does after this check, and starts a fix

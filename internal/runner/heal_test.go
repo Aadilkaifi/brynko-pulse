@@ -95,6 +95,11 @@ func TestRunHealsAndSendsOneMessage(t *testing.T) {
 	if len(recs) != 2 || kinds["heal"] != 1 || kinds[alert.KindHealed] != 1 {
 		t.Fatalf("history = %+v, want one fix and one healed message", recs)
 	}
+	for _, r := range recs {
+		if r.Kind == alert.KindHealed && !strings.Contains(r.Detail, "It failed (") {
+			t.Fatalf("the healed line says %q, want what broke and what pulse did", r.Detail)
+		}
+	}
 	snap, _ := store.ReadState(dataDir)
 	hs := snap.Monitors["backup"].Heal
 	if hs == nil || hs.Action != "run" || hs.AttemptsUsed != 1 || hs.Attempts != 3 || hs.LastAt.IsZero() {
