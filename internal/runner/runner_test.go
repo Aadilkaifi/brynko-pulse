@@ -19,6 +19,7 @@ import (
 
 	"github.com/Aadilkaifi/brynko-pulse/internal/alert"
 	"github.com/Aadilkaifi/brynko-pulse/internal/engine"
+	"github.com/Aadilkaifi/brynko-pulse/internal/notify"
 	"github.com/Aadilkaifi/brynko-pulse/internal/platform"
 	"github.com/Aadilkaifi/brynko-pulse/internal/silence"
 	"github.com/Aadilkaifi/brynko-pulse/internal/store"
@@ -220,5 +221,29 @@ func TestSilenceHoldsThenReminds(t *testing.T) {
 	defer mu.Unlock()
 	if len(got) != 1 || got[0].Kind != alert.KindFiring || !strings.Contains(got[0].Detail, "after the silence ended") {
 		t.Fatalf("want one reminder after the silence, got %+v", got)
+	}
+}
+
+// An alert a channel could not deliver gets its own history line, tied to the alert by its
+// kind and time, so "sent to email" is never read as "email arrived".
+func TestUndeliveredAlertIsInHistory(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &runner{o: Options{Log: slog.New(slog.NewTextHandler(io.Discard, nil))}, st: st}
+	at := time.Date(2026, 10, 17, 20, 23, 20, 0, time.UTC)
+	r.undelivered(notify.Failure{Channel: "email", Err: "connect to smtp.example.co:587: no such host",
+		Alert: alert.Alert{Monitor: "api", MonitorName: "API", Kind: alert.KindFiring, Severity: "critical", At: at}})
+	recs, _ := store.History(dir, 5)
+	if len(recs) != 1 {
+		t.Fatalf("history = %+v", recs)
+	}
+	got := recs[0]
+	if got.Kind != store.KindUndelivered || got.Monitor != "api" || got.Name != "API" || got.Severity != "critical" ||
+		got.AlertKind != alert.KindFiring || !got.AlertAt.Equal(at) || len(got.Channels) != 1 || got.Channels[0] != "email" ||
+		!strings.Contains(got.Detail, "no such host") {
+		t.Fatalf("record = %+v", got)
 	}
 }

@@ -129,3 +129,29 @@ func TestDispatchAfterStopIsSafe(t *testing.T) {
 	}
 	d.flushHeld()
 }
+
+// A channel that still fails after every retry is reported once, with its error, so the
+// history can say the alert did not arrive. One that recovers on a retry is not reported.
+func TestFailureReportedAfterRetries(t *testing.T) {
+	bad, flaky := &fakeSender{failures: 99}, &fakeSender{failures: 1}
+	d := newTest(10, map[string]*fakeSender{"mail": bad, "tg": flaky}, nil)
+	var mu sync.Mutex
+	var got []Failure
+	d.OnFailure(func(f Failure) { mu.Lock(); got = append(got, f); mu.Unlock() })
+	ctx, cancel := context.WithCancel(context.Background())
+	d.Start(ctx)
+	a := fire("critical")
+	a.At = time.Date(2026, 10, 17, 20, 23, 20, 0, time.UTC)
+	d.Dispatch(a, []string{"mail", "tg"})
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	d.Stop(5 * time.Second)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 1 || got[0].Channel != "mail" || got[0].Err != "temporary failure" || !got[0].Alert.At.Equal(a.At) {
+		t.Fatalf("failures = %+v", got)
+	}
+	if flaky.count() != 1 {
+		t.Fatalf("tg sent %d, want 1", flaky.count())
+	}
+}

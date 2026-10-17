@@ -179,6 +179,7 @@ func (r *runner) start(parent context.Context, cfg *config.Config) *generation {
 		r.o.Log.Error("maintenance windows ignored", "error", err.Error())
 	}
 	g.windows = windows
+	g.disp.OnFailure(r.undelivered)
 	g.disp.Start(ctx)
 
 	deps := monitor.Deps{Platform: r.o.Platform, DataDir: r.o.DataDir,
@@ -384,6 +385,17 @@ func (r *runner) checkOnce(ctx context.Context, g *generation, m config.Monitor,
 		rec.Channels = g.disp.Dispatch(a, m.Notify)
 		r.o.Log.Info("alert", "kind", a.Kind, "monitor", m.ID, "severity", a.Severity, "detail", a.Detail)
 	}
+	if err := r.st.Append(rec); err != nil {
+		r.o.Log.Error("cannot write alert history", "error", err.Error())
+	}
+}
+
+// undelivered records in the history that a channel could not deliver an alert, so the
+// alert's own record (which lists the channels it was handed to) is not read as delivered.
+func (r *runner) undelivered(f notify.Failure) {
+	rec := store.Record{At: time.Now(), Kind: store.KindUndelivered, Monitor: f.Alert.Monitor,
+		Name: f.Alert.MonitorName, Severity: f.Alert.Severity, Detail: f.Err, Channels: []string{f.Channel},
+		AlertKind: f.Alert.Kind, AlertAt: f.Alert.At}
 	if err := r.st.Append(rec); err != nil {
 		r.o.Log.Error("cannot write alert history", "error", err.Error())
 	}

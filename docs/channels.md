@@ -33,7 +33,8 @@ sudo systemctl reload brynko-pulse   # Windows: sc.exe control brynko-pulse para
 
 Every channel can set `min_severity` (`info`, `warning`, `critical`) to receive only the more
 urgent alerts. Failed deliveries are retried after 2 and 10 seconds, and `pulse status` shows each
-channel's last delivery or error. All fields are in the [configuration reference](config-reference.md).
+channel's last delivery or error. An alert still not delivered after the retries is also written to
+the history, as kind `undelivered` with the channel and its error. All fields are in the [configuration reference](config-reference.md).
 
 ## `smtp`
 

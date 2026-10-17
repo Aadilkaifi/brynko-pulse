@@ -162,8 +162,12 @@ func cmdHistory(args []string, stdout, stderr io.Writer) int {
 		if r.Silenced {
 			kind += " (silenced)"
 		}
+		detail := r.Detail
+		if r.Kind == store.KindUndelivered {
+			detail = "not delivered to " + strings.Join(r.Channels, ", ") + ": " + detail
+		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", r.At.Local().Format("2006-01-02 15:04"),
-			kind, r.Severity, r.Monitor, oneLine(r.Detail))
+			kind, r.Severity, r.Monitor, oneLine(detail))
 	}
 	tw.Flush()
 	return exitOK

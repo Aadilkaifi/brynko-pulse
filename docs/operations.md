@@ -25,6 +25,9 @@ Every command that prints data accepts `--json`. The output is a contract that t
 - In `status --json`, each monitor has `enabled`; an inactive monitor is not checked and has no
   values. A monitor with a heal rule also has `heal` (see [Self-healing](self-healing.md)).
 - `history` lists alerts and, as kind `heal`, every fix [self-healing](self-healing.md) tried.
+  `channels` on an alert are the channels it was handed to. One a channel could not deliver after
+  its retries has a second record of kind `undelivered`: `channels` names that channel, `detail` is
+  its error, and `alert_kind` and `alert_at` are the kind and time of the alert it belongs to.
 
 ## The service
 

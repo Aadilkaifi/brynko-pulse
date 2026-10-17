@@ -79,6 +79,9 @@ type Snapshot struct {
 	Channels map[string]ChannelStatus `json:"channels"`
 }
 
+// KindUndelivered is the history kind of an alert a channel could not deliver.
+const KindUndelivered = "undelivered"
+
 // Record is one line of alert history.
 type Record struct {
 	At       time.Time `json:"at"`
@@ -89,6 +92,11 @@ type Record struct {
 	Detail   string    `json:"detail"`
 	Channels []string  `json:"channels"`
 	Silenced bool      `json:"silenced,omitempty"` // held back by a silence, sent nowhere
+
+	// For KindUndelivered: the kind and time of the alert that was not delivered, so a
+	// reader can match it to that alert's own record. Detail is the channel's error.
+	AlertKind string    `json:"alert_kind,omitempty"`
+	AlertAt   time.Time `json:"alert_at,omitzero"`
 }
 
 // Store writes to one data folder.

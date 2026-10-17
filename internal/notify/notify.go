@@ -57,6 +57,20 @@ type Dispatcher struct {
 	heldWorst  string
 	status     map[string]store.ChannelStatus
 	retryDelay []time.Duration
+	onFail     func(Failure)
+}
+
+// Failure is an alert that could not be delivered to one channel, after every retry.
+type Failure struct {
+	Channel string
+	Alert   alert.Alert
+	Err     string // the channel's error; channels never put a URL or a secret in it
+}
+
+// OnFailure sets fn to be called for every alert a channel could not deliver, so the
+// history can show it. Set it before Start; fn runs on a delivery worker.
+func (d *Dispatcher) OnFailure(fn func(Failure)) {
+	d.onFail = fn
 }
 
 // New builds a sender for every configured channel. Channels that cannot be
@@ -216,6 +230,9 @@ func (d *Dispatcher) deliver(ctx context.Context, j job) {
 		d.mu.Unlock()
 		if err != nil {
 			d.log.Error("alert not delivered", "channel", id, "monitor", j.a.Monitor, "error", err.Error())
+			if d.onFail != nil {
+				d.onFail(Failure{Channel: id, Alert: j.a, Err: err.Error()})
+			}
 		}
 	}
 }
