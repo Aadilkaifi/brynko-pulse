@@ -1,0 +1,16 @@
+name: Feature request
+description: Something pulse should watch, a channel it should send to, or a change to how it works.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you are trying to do
+      description: The situation and what is missing today.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: How it could work
+      description: For example the monitor type, the values it would report, or the YAML you would like to write.

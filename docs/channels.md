@@ -112,5 +112,39 @@ it, and reject old timestamps, to know the request came from your pulse.
 
 ## `brynko`
 
-Not available yet. The brynko relay will send WhatsApp and email for you, paid from brynko
-account credits, for people who do not want their own mail server or Meta account.
+The brynko relay sends alerts by WhatsApp and email for you, so you need no mail server, no Meta
+account and no message template of your own. It is a paid service from brynko, the makers of pulse,
+used from brynko account credits. pulse itself stays free and works fully without it; every other
+channel on this page is yours to run.
+
+> **Coming soon.** The relay is not open yet. pulse already accepts the channel below and checks it,
+> and `pulse status` shows it as "cannot be used: not available in this version yet" until a release
+> turns it on. Nothing is sent until then, so you can add it today and keep another channel as well.
+
+1. Create a brynko account at [cloudagent.brynko.in](https://cloudagent.brynko.in) and add credits.
+2. Create a relay key for this server and keep it in `secrets.env`, for example
+   `PULSE_BRYNKO_KEY=...`.
+3. Add the channel:
+
+```yaml
+  brynko-relay:
+    type: brynko
+    api_key: ${PULSE_BRYNKO_KEY}
+    whatsapp: ["+919876543210"]       # international format; optional
+    email: [ops@example.com]          # optional; at least one of whatsapp and email
+```
+
+| Setting | Notes |
+|---|---|
+| `api_key` | The relay key, as a `${NAME}` reference; one key per server is the safest |
+| `whatsapp` | Phone numbers in international format |
+| `email` | Email addresses |
+| `min_severity` | As for every channel, for example `critical` to pay only for the alerts that matter |
+
+**What the relay receives:** the alert itself (the server's name and address, the monitor, what is
+wrong, when it started), nothing else from the server. It is used only to deliver that message.
+
+**Costs:** each message delivered uses credits from your brynko account; the prices are on the brynko
+site. When the credits run out, the relay stops delivering and `pulse status` shows the channel's
+last error, so keep a second channel (email through your own server, Telegram or Slack) for
+critical alerts.

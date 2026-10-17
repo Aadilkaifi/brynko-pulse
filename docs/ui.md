@@ -53,7 +53,7 @@ name.
 
 ## Uninstalling
 
-**Uninstall** on the server's page asks what to do with pulse's data:
+**Uninstall pulse**, in the server's menu (the three dots), asks what to do with pulse's data:
 
 - **Keep its data:** the service and program are removed; monitors, channels, secrets and history
   stay on the server, and installing again picks them up (`pulse uninstall`).
@@ -62,10 +62,21 @@ name.
 
 ## The assistant
 
-The app's chat assistant can read pulse for you: what each server watches, what is failing, the
-alert history, and this guide, which ships with the app. It can also silence monitors, turn them on
-or off, add or change monitors and install or upgrade pulse, but only after you approve each change
-on a card that shows what it will do. Removing pulse is left to the Uninstall button.
+The app has an AI assistant that knows pulse. It reads the same things you would: what each server
+watches, what is failing and since when, the alert history, and this guide, which ships inside the
+app so it always matches the pulse it installs. Ask it in your own words:
+
+- "Is anything wrong on web-1?" It checks pulse and the server and tells you what failed and why.
+- "Watch the payments API and tell me if its health check stops saying ok." It reads which monitor
+  types the server offers, writes the website monitor with the right JSON check, and shows it to you.
+- "Silence the database alerts for the next hour, we are migrating." It sets the silence with your
+  reason.
+- "Why did I get three disk alerts last night?" It reads the history and the monitor's rule.
+
+It can silence monitors, turn them on or off, add or change monitors, and install or upgrade pulse,
+but every change waits for you: the app shows a card with exactly what will change, and nothing
+happens until you approve it. Reading is free; changing always needs your yes. Removing pulse is
+not something the assistant does; that stays with **Uninstall** in the server's menu.
 
 ## How the app talks to pulse
 

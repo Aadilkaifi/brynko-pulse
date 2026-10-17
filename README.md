@@ -1,10 +1,12 @@
 # brynko-pulse
 
-Open-source monitoring and alerts for Linux and Windows servers. One small program watches the
-server and tells you within seconds when something breaks, through the channels you choose: email,
+Open-source monitoring and alerts for Linux and Windows servers, developed by
+[brynko technologies](https://brynko.in). One small program watches the server and tells you within
+seconds when something breaks, through the channels you choose: email,
 WhatsApp (your own Meta account), Telegram, Slack or any webhook.
 
-> **Status: early development.** Not ready for production yet.
+> **Status: first public release (v0.1).** In daily use on our own Linux and Windows servers. Expect
+> rough edges, and please report what you find.
 
 ## Why
 
@@ -36,8 +38,24 @@ sudo pulse test channel ops-email     # sends a test alert
 sudo systemctl reload brynko-pulse    # applies the change
 ```
 
-Prefer a graphical interface? The brynko devOps Agent desktop app installs and manages pulse on
-your servers over SSH. See [Using pulse from an app](docs/ui.md).
+## Manage every server from one app
+
+pulse is complete on its own. If you look after more than a few servers, the **brynko devOps Agent**
+desktop app gives you one place for all of them:
+
+- **Install in one click** on Linux and Windows servers over SSH, checked against the release
+  checksums. Nothing to download on the server.
+- **Every server at a glance:** what each monitor watches, what it alerts on in plain words, and
+  what is failing right now.
+- **Forms instead of YAML**, built from pulse itself, with the server's own disks, services,
+  containers and ports to pick from, and a check before anything is saved.
+- **Channels, silences, maintenance windows and defaults** in a few clicks.
+- **An AI assistant** that reads your servers and this guide, explains what is wrong, and makes
+  changes only after you approve each one.
+
+The same app also works with your containers, databases, files and deploy scripts.
+[Download brynko devOps Agent](https://cloudagent.brynko.in/download) and see
+[Using pulse from an app](docs/ui.md).
 
 ## Documentation
 

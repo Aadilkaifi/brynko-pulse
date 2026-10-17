@@ -92,7 +92,9 @@ func starterFiles(opts InitOptions) (map[string][]byte, error) {
 		if err != nil {
 			return err
 		}
-		out[p] = data
+		// The starter files are written with LF line endings whatever the checkout used, so the
+		// replacements below match on every platform.
+		out[p] = []byte(strings.ReplaceAll(string(data), "\r\n", "\n"))
 		return nil
 	})
 	if err != nil {

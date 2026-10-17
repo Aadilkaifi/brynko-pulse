@@ -1,0 +1,48 @@
+name: Bug report
+description: Something in pulse does not work as the docs say.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please **remove passwords, tokens and webhook addresses** from anything you paste.
+        For a security problem, do not open an issue: use **Security > Report a vulnerability** instead.
+  - type: input
+    id: version
+    attributes:
+      label: pulse version
+      description: The output of `pulse version`.
+      placeholder: pulse 0.1.0 (go1.24, linux/amd64)
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - Windows
+    validations:
+      required: true
+  - type: input
+    id: distro
+    attributes:
+      label: Distribution or Windows version
+      placeholder: Ubuntu 24.04, Windows Server 2022
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: The monitor or channel involved
+      description: The YAML, with secrets removed.
+      render: yaml
+  - type: textarea
+    id: output
+    attributes:
+      label: Output of `sudo pulse validate` and `pulse status`
+      render: text

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -20,8 +21,13 @@ func TestInitCreatesValidConfig(t *testing.T) {
 	if len(res.Created) != 5 {
 		t.Fatalf("created %v, want 5 files", res.Created)
 	}
-	if fi, err := os.Stat(SecretsPath(dir)); err != nil || fi.Mode().Perm()&0o007 != 0 {
-		t.Fatalf("secrets.env must exist and be private: %v", err)
+	fi, err := os.Stat(SecretsPath(dir))
+	if err != nil {
+		t.Fatalf("secrets.env must exist: %v", err)
+	}
+	// On Windows privacy is the folder's access list (tested in platform/windows), not the file mode.
+	if runtime.GOOS != "windows" && fi.Mode().Perm()&0o007 != 0 {
+		t.Fatalf("secrets.env must be private, mode %v", fi.Mode().Perm())
 	}
 	got := Validate(dir)
 	if !got.OK() {
