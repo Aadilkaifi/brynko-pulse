@@ -1,0 +1,7 @@
+# Source, docs, starter configuration and scripts keep LF line endings in every checkout, so the
+# files pulse embeds and the scripts it ships are the same whichever system builds them.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.png binary
+*.ico binary
