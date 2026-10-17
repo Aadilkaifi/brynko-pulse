@@ -20,17 +20,21 @@ WhatsApp (your own Meta account), Telegram, Slack or any webhook.
 
 ## Install
 
+**Linux**, on the server:
+
 ```sh
 curl -fsSL https://github.com/Aadilkaifi/brynko-pulse/releases/latest/download/install.sh | sudo sh
 ```
 
-Or install the `.deb` or `.rpm` from the releases page, or run the Windows binary with
-`pulse install` as Administrator. See [Install](docs/install.md).
+**Windows:** one block to paste into PowerShell as Administrator, in [Install](docs/install.md#windows).
+
+Both download the latest release, check it against `SHA256SUMS` and start pulse as a service.
+Packages, a specific version and uninstalling are in [Install](docs/install.md).
 
 ## First steps
 
 ```sh
-pulse status                          # disk, memory, CPU and swap are watched; what install found is listed, inactive
+sudo pulse status                     # disk, memory, CPU and swap are watched; what install found is listed, inactive
 sudoedit /etc/brynko-pulse/monitors/service-nginx.yaml   # remove "enabled: false" to watch it
 sudoedit /etc/brynko-pulse/channels.yaml                 # where alerts go
 sudo pulse validate                   # says exactly what to fix
