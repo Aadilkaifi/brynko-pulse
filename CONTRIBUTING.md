@@ -6,8 +6,8 @@ Thanks for helping. A few rules keep the project safe to run on production serve
 
 - For anything larger than a small fix, open an issue first so we can agree on the approach.
 - New dependencies need a clear reason. Prefer the Go standard library.
-- You must sign the [Contributor Licence Agreement](CLA.md) before a pull request can be merged. A bot
-  asks you on your first pull request.
+- You must agree to the [Contributor Licence Agreement](CLA.md) before a pull request can be merged:
+  tick the box for it in the pull request description.
 
 ## Build and test
 
@@ -48,5 +48,4 @@ See [docs/build.md](docs/build.md) for building, packaging and releases.
 
 ## Writing
 
-Messages and docs use plain language: say what happened and what to do next. Do not use the em dash
-character; use commas, colons or full stops.
+Messages and docs use plain language: say what happened and what to do next.
