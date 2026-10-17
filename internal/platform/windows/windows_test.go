@@ -51,9 +51,47 @@ func TestSetTreeACLLeavesNoFileOpenToEveryone(t *testing.T) {
 		if dacl.AceCount == 0 {
 			t.Fatalf("%s inherited nothing from its folder", f)
 		}
-		if who, err := grantedToOthers(p, writeRights); err != nil || (who != "" && who != me.User.Sid.String()) {
+		if who, err := grantedToOthers(p, writeRights); err != nil || who != "" {
 			t.Fatalf("%s can be changed by %q (%v)", f, who, err)
 		}
+	}
+}
+
+// Without elevation, pulse init --config <own folder> must not lock the user out: they can still
+// change the files, pulse accepts the folder, and the folder can be deleted. Anyone else still
+// makes it refuse.
+func TestSecureConfigKeepsTheUserRunningPulse(t *testing.T) {
+	dir := t.TempDir() // cleanup fails the test if the folder became undeletable
+	cfg := filepath.Join(dir, "pulse.yaml")
+	if err := os.WriteFile(cfg, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var p Platform
+	if err := p.SecureConfig(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfg, []byte("y"), 0o644); err != nil {
+		t.Fatalf("the user running pulse lost access: %v", err)
+	}
+	if err := p.CheckConfigSecure(dir); err != nil {
+		t.Fatalf("pulse refused its own folder: %v", err)
+	}
+
+	// Built-in Users added: pulse must refuse.
+	sd, err := windows.SecurityDescriptorFromString("D:(A;;FA;;;BU)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	extra, _, err := sd.DACL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := windows.SetNamedSecurityInfo(cfg, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|
+		windows.UNPROTECTED_DACL_SECURITY_INFORMATION, nil, nil, extra, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.CheckConfigSecure(dir); err == nil {
+		t.Fatal("pulse accepted a file every user may change")
 	}
 }
 

@@ -210,7 +210,7 @@ const (
 )
 
 // CheckConfigSecure refuses configuration that anyone other than SYSTEM,
-// Administrators or a service account may change.
+// Administrators, a service account or the user running pulse may change.
 func (Platform) CheckConfigSecure(dir string) error {
 	paths := []string{dir}
 	_ = filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
@@ -223,14 +223,14 @@ func (Platform) CheckConfigSecure(dir string) error {
 		if who, err := grantedToOthers(p, writeRights); err != nil {
 			return err
 		} else if who != "" {
-			return fmt.Errorf("%s can be changed by %s. Only SYSTEM and Administrators may change it; run pulse init again or fix its permissions", p, who)
+			return fmt.Errorf("%s can be changed by %s. Only SYSTEM, Administrators and the user running pulse may change it; run pulse init again or fix its permissions", p, who)
 		}
 	}
 	return nil
 }
 
 // CheckSecretFile refuses a secrets file that anyone other than SYSTEM,
-// Administrators or a service account may read or change.
+// Administrators, a service account or the user running pulse may read or change.
 func (Platform) CheckSecretFile(path string) error {
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -238,7 +238,7 @@ func (Platform) CheckSecretFile(path string) error {
 	if who, err := grantedToOthers(path, readRights|writeRights); err != nil {
 		return err
 	} else if who != "" {
-		return fmt.Errorf("%s holds secrets but %s can read or change it. Only SYSTEM and Administrators may; fix its permissions", path, who)
+		return fmt.Errorf("%s holds secrets but %s can read or change it. Only SYSTEM, Administrators and the user running pulse may; fix its permissions", path, who)
 	}
 	return nil
 }
@@ -255,6 +255,11 @@ func grantedToOthers(path string, rights windows.ACCESS_MASK) (string, error) {
 	if dacl == nil {
 		return "everyone", nil // a null DACL grants everyone full access
 	}
+	// As on Linux, where the user running pulse may own its files.
+	me, err := currentUser()
+	if err != nil {
+		return "", err
+	}
 	for i := uint32(0); i < uint32(dacl.AceCount); i++ {
 		var ace *windows.ACCESS_ALLOWED_ACE
 		if err := windows.GetAce(dacl, i, &ace); err != nil {
@@ -268,7 +273,8 @@ func grantedToOthers(path string, rights windows.ACCESS_MASK) (string, error) {
 		}
 		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
 		if sid.IsWellKnown(windows.WinLocalSystemSid) || sid.IsWellKnown(windows.WinBuiltinAdministratorsSid) ||
-			strings.HasPrefix(sid.String(), "S-1-5-80-") { // service SIDs such as TrustedInstaller
+			strings.HasPrefix(sid.String(), "S-1-5-80-") || // service SIDs such as TrustedInstaller
+			windows.EqualSid(sid, me) {
 			continue
 		}
 		return sid.String(), nil
@@ -277,8 +283,26 @@ func grantedToOthers(path string, rights windows.ACCESS_MASK) (string, error) {
 }
 
 // SecureConfig gives only SYSTEM and Administrators access to the config folder.
+// Without elevation the user running pulse keeps access too; otherwise they would
+// lock themselves out of a folder they chose with --config.
 func (p Platform) SecureConfig(dir string) error {
-	return setTreeACL(dir, adminOnlySDDL, p.DataDir())
+	sddl := adminOnlySDDL
+	if !windows.GetCurrentProcessToken().IsElevated() {
+		me, err := currentUser()
+		if err != nil {
+			return err
+		}
+		sddl += fmt.Sprintf(serviceFullACE, me.String())
+	}
+	return setTreeACL(dir, sddl, p.DataDir())
+}
+
+func currentUser() (*windows.SID, error) {
+	u, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		return nil, fmt.Errorf("read the current user: %w", err)
+	}
+	return u.User.Sid, nil
 }
 
 // setTreeACL sets a protected DACL on dir and makes everything below inherit
