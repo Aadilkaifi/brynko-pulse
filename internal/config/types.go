@@ -187,6 +187,15 @@ func (h Heal) Effective() Heal {
 	return h
 }
 
+// HealActions lists the fixes a monitor type supports: every type may run a
+// program; only the types that watch something restartable may restart it.
+func HealActions(monitorType string) []string {
+	if monitorType == "service" || monitorType == "container" {
+		return []string{HealRestart, HealRun}
+	}
+	return []string{HealRun}
+}
+
 // HealsService reports whether a heal rule restarts a service, which needs a
 // right the service account does not have by default.
 func (m Monitor) HealsService() bool {

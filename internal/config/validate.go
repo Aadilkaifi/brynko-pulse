@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -372,7 +373,7 @@ func crossCheck(docs []document, secrets Secrets, r *Result) {
 				}
 			}
 			if heal, ok := mon["heal"].(map[string]any); ok && heal["action"] == HealRestart {
-				if t := mon["type"]; t != "service" && t != "container" {
+				if t, _ := mon["type"].(string); !slices.Contains(HealActions(t), HealRestart) {
 					r.Errors = append(r.Errors, issueAt(d, append(base, "heal", "action"), fmt.Sprintf(
 						"heal: restart works for service and container monitors, not %s. Use action: run with a program that fixes it", t)))
 				}
