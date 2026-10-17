@@ -30,7 +30,7 @@ func cmdStatus(args []string, stdout, stderr io.Writer) int {
 
 	snap, err := store.ReadState(*dataDir)
 	if err == nil && snap == nil {
-		err = fmt.Errorf("pulse has not run on this server yet (no state in %s). Start it with: pulse run", *dataDir)
+		err = fmt.Errorf("pulse has not reported yet (no state in %s). If its service was just started, wait a few seconds; otherwise start it: %s", *dataDir, platformFor().StartCommand())
 	}
 	stale := err == nil && time.Since(snap.Updated) > staleAfter
 	if *asJSON {

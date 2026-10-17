@@ -174,6 +174,9 @@ func (Platform) ReloadService(ctx context.Context) (bool, error) {
 // stops or reloads it with signals.
 func (Platform) RunAsService(host.ServiceFunc) (bool, error) { return false, nil }
 
+// StartCommand is how a person starts the installed service by hand.
+func (Platform) StartCommand() string { return "sudo systemctl start " + host.ServiceName }
+
 // installedBinary is where the service runs pulse from: the package's copy
 // when the package manager installed it, otherwise our own copy.
 func installedBinary(source string) string {

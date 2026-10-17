@@ -43,6 +43,7 @@ func (unsupported) ReloadService(context.Context) (bool, error)                {
 func (unsupported) RunAsService(host.ServiceFunc) (bool, error) {
 	return false, nil
 }
+func (unsupported) StartCommand() string { return "pulse run" }
 func (unsupported) Install(context.Context, host.InstallOptions) (host.InstallResult, error) {
 	return host.InstallResult{}, errOS
 }
