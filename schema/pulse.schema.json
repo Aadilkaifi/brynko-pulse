@@ -263,20 +263,35 @@
       "items": { "$ref": "#/$defs/monitor" }
     },
     "heal": {
-      "description": "Self-healing: what pulse does by itself when this monitor fails, a limited number of times. It waits until the problem has lasted the monitor's for (at least 30s), tries the fix, and waits verify for the monitor to be OK again. Off unless set.",
+      "description": "Self-healing: what pulse does when this monitor fails. In ask mode pulse prepares the fix and waits for you to approve it; in auto mode it runs the fix by itself. Either way it waits until the problem has lasted the monitor's for (at least 30s), runs the steps in order, and waits verify for the monitor to be OK again.",
       "type": "object",
       "properties": {
-        "action": { "enum": ["restart", "run"], "description": "restart: restart the service or container this monitor watches. run: run your own program." },
-        "run": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "For action run: the program and its arguments. Never run through a shell. It runs as the pulse service account." },
-        "timeout": { "$ref": "#/$defs/duration", "default": "90s", "description": "How long the fix may take." },
-        "attempts": { "type": "integer", "minimum": 1, "maximum": 10, "default": 3, "description": "How many tries within the window before pulse gives up and alerts." },
-        "within": { "$ref": "#/$defs/duration", "default": "1h", "description": "The window the attempts are counted in." },
-        "verify": { "$ref": "#/$defs/duration", "default": "2m", "description": "How long to wait after a fix for the monitor to be OK again before counting it as failed." }
+        "mode": { "enum": ["off", "ask", "auto"], "default": "ask", "description": "ask: prepare the fix and wait for approval (pulse fix approve, or the app). auto: run it by itself; after 2 automatic fixes that did not help in one problem, or when the tries are used up, the next fix waits for approval. off: keep the rule but do nothing." },
+        "steps": {
+          "type": "array", "minItems": 1, "maxItems": 10,
+          "description": "What to do, in order. pulse stops at the first step that fails.",
+          "items": { "$ref": "#/$defs/healStep" }
+        },
+        "only_if_ok": {
+          "type": "array", "items": { "$ref": "#/$defs/id" }, "uniqueItems": true,
+          "description": "Monitors that must be OK before a fix. When one of them is failing, it is the likely cause: pulse does not fix this one and says so in the alert."
+        },
+        "timeout": { "$ref": "#/$defs/duration", "default": "90s", "description": "How long all the steps together may take." },
+        "attempts": { "type": "integer", "minimum": 1, "maximum": 10, "default": 3, "description": "How many automatic fixes within the window. Fixes you approve are not counted." },
+        "within": { "$ref": "#/$defs/duration", "default": "1h", "description": "The window automatic fixes are counted in." },
+        "verify": { "$ref": "#/$defs/duration", "default": "2m", "description": "How long to wait after a fix for the monitor to be OK again before counting it as not helping." }
       },
-      "required": ["action"],
-      "allOf": [
-        { "if": { "properties": { "action": { "const": "run" } } }, "then": { "required": ["run"] } }
-      ],
+      "required": ["steps"],
+      "additionalProperties": false
+    },
+    "healStep": {
+      "type": "object",
+      "description": "One step: restart services, restart containers, or run a program.",
+      "properties": {
+        "restart_service": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1, "maxLength": 256 }, "description": "Services to restart, in order: on Linux systemd units without .service, on Windows service names. pulse gets the right to restart only these." },
+        "restart_container": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$", "maxLength": 256 }, "description": "Docker containers to restart, in order, by name as docker ps shows it." },
+        "run": { "type": "array", "minItems": 1, "items": { "type": "string" }, "description": "A program and its arguments. Never run through a shell; it runs as the pulse service account." }
+      },
       "additionalProperties": false
     },
     "monitor": {

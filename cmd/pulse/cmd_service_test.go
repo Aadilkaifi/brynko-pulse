@@ -183,14 +183,16 @@ func TestHealRightsFollowTheConfiguration(t *testing.T) {
 		}
 	}
 	writeMon("monitors:\n" +
-		"  - id: web\n    type: service\n    service: nginx\n    heal:\n      action: restart\n" +
-		"  - id: off\n    type: service\n    service: mysql\n    enabled: false\n    heal:\n      action: restart\n" +
-		"  - id: api\n    type: container\n    container: api\n    heal:\n      action: restart\n")
+		"  - id: web\n    type: service\n    service: nginx\n    heal:\n      steps:\n        - restart_service: [php8.3-fpm, nginx]\n" +
+		"  - id: site\n    type: http\n    url: https://example.com\n    heal:\n      mode: auto\n      steps:\n        - restart_service: [nginx]\n" +
+		"  - id: off\n    type: service\n    service: mysql\n    enabled: false\n    heal:\n      steps:\n        - restart_service: [mysql]\n" +
+		"  - id: kept\n    type: service\n    service: redis\n    heal:\n      mode: \"off\"\n      steps:\n        - restart_service: [redis]\n" +
+		"  - id: api\n    type: container\n    container: api\n    heal:\n      steps:\n        - restart_container: [api]\n")
 	if code, out, errOut := runCmd("install", "--config", cfg, "--data", data, "--no-discover"); code != exitOK {
 		t.Fatalf("install: %d %s %s", code, out, errOut)
 	}
-	if len(f.healRights) != 1 || strings.Join(f.healRights[0], ",") != "nginx" {
-		t.Fatalf("install granted %v, want only nginx (mysql is off, a container needs no right)", f.healRights)
+	if len(f.healRights) != 1 || strings.Join(f.healRights[0], ",") != "nginx,php8.3-fpm" {
+		t.Fatalf("install granted %v, want nginx and php8.3-fpm once each (mysql's monitor is off, redis's fix is off, a container needs no right)", f.healRights)
 	}
 
 	stdin = strings.NewReader("monitors:\n  - id: web\n    type: service\n    service: nginx\n")

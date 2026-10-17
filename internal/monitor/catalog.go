@@ -33,7 +33,7 @@ type TypeInfo struct {
 	Instant string `json:"instant,omitempty"`
 	// Choice offers some of the type's fields as one pick, so a form shows only the chosen option's fields.
 	Choice *Choice `json:"choice,omitempty"`
-	// Heal lists the self-healing fixes the type supports (heal: action), from config.HealActions.
+	// Heal lists the kinds of heal steps the type supports, from config.HealSteps; none when a fix cannot help.
 	Heal []string `json:"heal,omitempty"`
 	// Because lists what can make the default flag false, so a message says which ("text not found").
 	Because []Reason    `json:"-"`
@@ -86,7 +86,7 @@ func flag(name, label, help string) ValueInfo {
 // Catalog lists every monitor type, in the order a picker shows them.
 func init() {
 	for i := range Catalog {
-		Catalog[i].Heal = config.HealActions(Catalog[i].Type)
+		Catalog[i].Heal = config.HealSteps(Catalog[i].Type)
 	}
 }
 

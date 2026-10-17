@@ -48,15 +48,28 @@ type MonitorStatus struct {
 	Heal *HealStatus `json:"heal,omitempty"` // set when the monitor has a heal rule
 }
 
-// HealStatus is what self-healing has done for one monitor.
+// HealStatus is what self-healing has done for one monitor, and what waits for approval.
 type HealStatus struct {
-	Action       string    `json:"action"`        // restart or run
-	Attempts     int       `json:"attempts"`      // allowed within the window
-	AttemptsUsed int       `json:"attempts_used"` // tries within the window
-	Healing      bool      `json:"healing,omitempty"`
-	GaveUp       bool      `json:"gave_up,omitempty"`
-	LastAt       time.Time `json:"last_at,omitzero"`
-	LastResult   string    `json:"last_result,omitempty"`
+	Mode         string       `json:"mode"`          // ask or auto
+	What         string       `json:"what"`          // the fix in words
+	Attempts     int          `json:"attempts"`      // automatic fixes allowed within the window
+	AttemptsUsed int          `json:"attempts_used"` // automatic fixes within the window
+	Healing      bool         `json:"healing,omitempty"`
+	GaveUp       bool         `json:"gave_up,omitempty"`
+	Waiting      *HealWaiting `json:"waiting,omitempty"`  // a fix prepared and waiting for approval
+	Approved     bool         `json:"approved,omitempty"` // it was approved and starts at the next check
+	Dismissed    bool         `json:"dismissed,omitempty"`
+	LastAt       time.Time    `json:"last_at,omitzero"`
+	LastResult   string       `json:"last_result,omitempty"`
+}
+
+// HealWaiting is a fix waiting for approval. ID names it, so an approval runs
+// only the fix that was prepared for this moment.
+type HealWaiting struct {
+	ID      string    `json:"id"`
+	Since   time.Time `json:"since"`
+	Expires time.Time `json:"expires"`
+	Why     string    `json:"why,omitempty"` // why it waits instead of running by itself
 }
 
 // ChannelStatus is the delivery health of one channel.

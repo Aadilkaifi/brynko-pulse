@@ -26,7 +26,7 @@ import (
 
 // Self-healing restarts a unit through systemd's D-Bus API, which still works
 // under the service's NoNewPrivileges. polkit decides; pulse's rule allows the
-// service account to restart only the units that have heal: restart.
+// service account to restart only the units named in restart_service heal steps.
 const (
 	polkitRulesDir = "/etc/polkit-1/rules.d"
 	polkitRule     = polkitRulesDir + "/60-" + host.ServiceName + ".rules"
@@ -52,7 +52,7 @@ func (Platform) RestartService(ctx context.Context, name string) error {
 		var de dbus.Error
 		if errors.As(err, &de) && (de.Name == "org.freedesktop.DBus.Error.AccessDenied" ||
 			de.Name == "org.freedesktop.DBus.Error.InteractiveAuthorizationRequired") {
-			return fmt.Errorf("%w: %s. Run sudo pulse install, which grants it for monitors with heal: restart", host.ErrHealNotAllowed, name)
+			return fmt.Errorf("%w: %s. Run sudo pulse install, which grants it for the services in restart_service heal steps", host.ErrHealNotAllowed, name)
 		}
 		if errors.As(err, &de) && (de.Name == "org.freedesktop.systemd1.NoSuchUnit" || de.Name == "org.freedesktop.systemd1.LoadFailed") {
 			return fmt.Errorf("service %s: %w", name, host.ErrNotFound)
@@ -82,7 +82,7 @@ func (Platform) SetHealRights(_ context.Context, services []string) (host.HealRi
 	}
 	units, skipped := healUnits(services)
 	for _, s := range skipped {
-		res.Warnings = append(res.Warnings, fmt.Sprintf("%q is not a service name pulse can allow; heal: restart will not work for it", s))
+		res.Warnings = append(res.Warnings, fmt.Sprintf("%q is not a service name pulse can allow; a restart_service step will not work for it", s))
 	}
 	if len(units) == 0 {
 		if err := os.Remove(polkitRule); err == nil {
@@ -94,8 +94,8 @@ func (Platform) SetHealRights(_ context.Context, services []string) (host.HealRi
 	}
 	if fi, err := os.Stat(polkitRulesDir); err != nil || !fi.IsDir() {
 		// polkit before 0.106 has no rules.d and cannot limit a right to single units.
-		res.Warnings = append(res.Warnings, "heal: restart cannot work on this server: its polkit cannot limit a right to single services "+
-			"(it needs polkit 0.106 or newer, as in Ubuntu 24.04, Debian 12 and RHEL 9). Use heal: run with a program instead")
+		res.Warnings = append(res.Warnings, "restart_service heal steps cannot work on this server: its polkit cannot limit a right to single services "+
+			"(it needs polkit 0.106 or newer, as in Ubuntu 24.04, Debian 12 and RHEL 9). Use a run step with a program instead")
 		return res, nil
 	}
 	want := polkitRuleText(units)
@@ -130,7 +130,7 @@ func healUnits(services []string) (units, skipped []string) {
 // polkitRuleText allows the pulse service account to restart only units, nothing else.
 func polkitRuleText(units []string) []byte {
 	list, _ := json.Marshal(units) // a JSON array of plain strings is a valid JavaScript array
-	return []byte(fmt.Sprintf(`// Written by pulse install. Do not edit: pulse rewrites it from the monitors with heal: restart.
+	return []byte(fmt.Sprintf(`// Written by pulse install. Do not edit: pulse rewrites it from the restart_service heal steps.
 // Lets the %[1]s service restart these units, and nothing else, for self-healing.
 polkit.addRule(function(action, subject) {
     if (action.id == "org.freedesktop.systemd1.manage-units" && subject.user == "%[1]s") {

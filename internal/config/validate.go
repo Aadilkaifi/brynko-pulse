@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -344,6 +343,12 @@ func crossCheck(docs []document, secrets Secrets, r *Result) {
 
 	monitorIDs := map[string]string{}
 	monitors := 0
+	type healDep struct {
+		doc          document
+		path         []string
+		monitor, dep string
+	}
+	var healDeps []healDep
 	var silent []Issue
 	for _, d := range docs {
 		if d.kind != kindMonitors {
@@ -372,14 +377,22 @@ func crossCheck(docs []document, secrets Secrets, r *Result) {
 					r.Errors = append(r.Errors, issueAt(d, append(base, "json_expect"), "json_expect: "+err.Error()))
 				}
 			}
-			if heal, ok := mon["heal"].(map[string]any); ok && heal["action"] == HealRestart {
-				if t, _ := mon["type"].(string); !slices.Contains(HealActions(t), HealRestart) {
-					r.Errors = append(r.Errors, issueAt(d, append(base, "heal", "action"), fmt.Sprintf(
-						"heal: restart works for service and container monitors, not %s. Use action: run with a program that fixes it", t)))
+			if heal, ok := mon["heal"].(map[string]any); ok {
+				if t, _ := mon["type"].(string); len(HealSteps(t)) == 0 {
+					r.Errors = append(r.Errors, issueAt(d, append(base, "heal"), fmt.Sprintf(
+						"%s monitors cannot have heal: restarting something or running a program does not fix what they watch. Remove heal", t)))
 				}
-				if _, has := heal["run"]; has {
-					r.Errors = append(r.Errors, issueAt(d, append(base, "heal", "run"),
-						"heal: run is for action: run. With action: restart, pulse restarts what the monitor watches; remove run"))
+				steps, _ := heal["steps"].([]any)
+				for j, step := range steps {
+					if n := len(step.(map[string]any)); n != 1 {
+						r.Errors = append(r.Errors, issueAt(d, append(base, "heal", "steps", fmt.Sprint(j)),
+							"heal: each step does one thing: restart_service, restart_container or run. Put them in separate steps"))
+					}
+				}
+				deps, _ := heal["only_if_ok"].([]any)
+				for j, dep := range deps {
+					healDeps = append(healDeps, healDep{doc: d, path: append(base, "heal", "only_if_ok", fmt.Sprint(j)),
+						monitor: id, dep: dep.(string)})
 				}
 			}
 			notify, has := mon["notify"].([]any)
@@ -393,6 +406,14 @@ func crossCheck(docs []document, secrets Secrets, r *Result) {
 				silent = append(silent, issueAt(d, base,
 					fmt.Sprintf("monitor %q has no channels, so its alerts go nowhere. Add notify here or under defaults in %s.", id, PulseFile)))
 			}
+		}
+	}
+	for _, h := range healDeps {
+		switch _, known := monitorIDs[h.dep]; {
+		case h.dep == h.monitor:
+			r.Errors = append(r.Errors, issueAt(h.doc, h.path, "heal: only_if_ok lists the monitor itself; list the monitors it depends on"))
+		case !known:
+			r.Errors = append(r.Errors, issueAt(h.doc, h.path, fmt.Sprintf("heal: only_if_ok names %q, which is not a monitor", h.dep)))
 		}
 	}
 	// One warning, not one per monitor, when the fix is a single line in pulse.yaml.

@@ -259,15 +259,26 @@ Exactly one of `host`, `file`.
 
 ### heal
 
-Self-healing: what pulse does by itself when this monitor fails, a limited number of times. It waits until the problem has lasted the monitor's for (at least 30s), tries the fix, and waits verify for the monitor to be OK again. Off unless set.
+Self-healing: what pulse does when this monitor fails. In ask mode pulse prepares the fix and waits for you to approve it; in auto mode it runs the fix by itself. Either way it waits until the problem has lasted the monitor's for (at least 30s), runs the steps in order, and waits verify for the monitor to be OK again.
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `action` | `restart` \| `run` | yes |  | restart: restart the service or container this monitor watches. run: run your own program. |
-| `attempts` | integer |  | `3` | How many tries within the window before pulse gives up and alerts. |
-| `run` | list of string |  |  | For action run: the program and its arguments. Never run through a shell. It runs as the pulse service account. |
-| `timeout` | duration (30s, 5m, 2h, 1d) |  | `90s` | How long the fix may take. |
-| `verify` | duration (30s, 5m, 2h, 1d) |  | `2m` | How long to wait after a fix for the monitor to be OK again before counting it as failed. |
-| `within` | duration (30s, 5m, 2h, 1d) |  | `1h` | The window the attempts are counted in. |
+| `steps` | list of [healStep](#healstep) | yes |  | What to do, in order. pulse stops at the first step that fails. |
+| `attempts` | integer |  | `3` | How many automatic fixes within the window. Fixes you approve are not counted. |
+| `mode` | `off` \| `ask` \| `auto` |  | `ask` | ask: prepare the fix and wait for approval (pulse fix approve, or the app). auto: run it by itself; after 2 automatic fixes that did not help in one problem, or when the tries are used up, the next fix waits for approval. off: keep the rule but do nothing. |
+| `only_if_ok` | list of id |  |  | Monitors that must be OK before a fix. When one of them is failing, it is the likely cause: pulse does not fix this one and says so in the alert. |
+| `timeout` | duration (30s, 5m, 2h, 1d) |  | `90s` | How long all the steps together may take. |
+| `verify` | duration (30s, 5m, 2h, 1d) |  | `2m` | How long to wait after a fix for the monitor to be OK again before counting it as not helping. |
+| `within` | duration (30s, 5m, 2h, 1d) |  | `1h` | The window automatic fixes are counted in. |
 
-`run` is required with `action: run`; `restart` works for `service` and `container` monitors. See [self-healing.md](self-healing.md).
+### healStep
+
+One step: restart services, restart containers, or run a program.
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `restart_container` | list of string |  |  | Docker containers to restart, in order, by name as docker ps shows it. |
+| `restart_service` | list of string |  |  | Services to restart, in order: on Linux systemd units without .service, on Windows service names. pulse gets the right to restart only these. |
+| `run` | list of string |  |  | A program and its arguments. Never run through a shell; it runs as the pulse service account. |
+
+Each step has exactly one of `restart_service`, `restart_container` or `run`. `ssl`, `file` and `heartbeat` monitors cannot have `heal`. See [self-healing.md](self-healing.md).

@@ -5,6 +5,7 @@ package heal
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -16,9 +17,10 @@ import (
 
 var t0 = time.Date(2026, 10, 17, 10, 0, 0, 0, time.UTC)
 
-func plan() Plan {
-	return Plan{Action: config.HealRestart, Attempts: 3, Within: time.Hour, Verify: 2 * time.Minute,
-		After: 30 * time.Second, Timeout: time.Minute, What: "restart nginx", Done: "restarted nginx"}
+func plan(mode string) Plan {
+	return Plan{Mode: mode, Steps: []config.HealStep{{RestartService: []string{"nginx"}}}, Attempts: 3, Within: time.Hour,
+		Verify: 2 * time.Minute, After: 30 * time.Second, Timeout: time.Minute, What: "restart nginx", Done: "restarted nginx",
+		Approve: "sudo pulse fix approve web"}
 }
 
 // sim drives a Tracker the way the runner does, with the engine deciding firing and resolved.
@@ -31,8 +33,11 @@ type sim struct {
 	runs int    // fixes started
 }
 
-func newSim(t *testing.T) *sim {
-	return &sim{t: t, tr: NewTracker(10), eng: engine.New(nil), p: plan()}
+func newSim(t *testing.T, mode string) *sim {
+	tr := NewTracker(10)
+	n := 0
+	tr.newID = func() string { n++; return fmt.Sprintf("fix%d", n) }
+	return &sim{t: t, tr: tr, eng: engine.New(nil), p: plan(mode)}
 }
 
 // check observes one result at time at and returns what self-healing decided.
@@ -48,19 +53,22 @@ func (s *sim) check(at time.Time, bad bool, blocked string) Step {
 	return st
 }
 
-func (s *sim) done(at time.Time, err error) {
-	s.tr.Done("web", Outcome{At: at, Err: err, Fatal: err != nil && strings.Contains(err.Error(), "not allowed")}, s.p.Verify)
+func (s *sim) done(at time.Time, err error, approved bool) {
+	s.tr.Done("web", Outcome{At: at, Err: err, Approved: approved,
+		Fatal: err != nil && strings.Contains(err.Error(), "not allowed")}, s.p.Verify)
 }
 
-func TestAFixThatWorksSendsOneHealedAlert(t *testing.T) {
-	s := newSim(t)
+// ── auto ─────────────────────────────────────────────────────────────────────
+
+func TestAutoFixThatWorksSendsOneHealedAlert(t *testing.T) {
+	s := newSim(t, config.HealAuto)
 	if st := s.check(t0, true, ""); st.Send != nil || st.Start {
 		t.Fatalf("first bad reading: %+v (nothing is sent and nothing is tried yet)", st)
 	}
-	if st := s.check(t0.Add(30*time.Second), true, ""); !st.Start || st.Attempt != 1 || st.Send != nil {
+	if st := s.check(t0.Add(30*time.Second), true, ""); !st.Start || st.Attempt != 1 || st.Send != nil || st.Approved {
 		t.Fatalf("after 30s: %+v, want the first fix and no alert yet", st)
 	}
-	s.done(t0.Add(35*time.Second), nil)
+	s.done(t0.Add(35*time.Second), nil, false)
 	if st := s.check(t0.Add(40*time.Second), false, ""); st.Send == nil || st.Kind != alert.KindHealed ||
 		!strings.Contains(st.Note, "It failed (stopped). pulse restarted nginx at") {
 		t.Fatalf("recovered: %+v", st)
@@ -70,88 +78,235 @@ func TestAFixThatWorksSendsOneHealedAlert(t *testing.T) {
 	}
 }
 
-func TestAFixThatDoesNotHelpTellsPeopleAndTriesAgain(t *testing.T) {
-	s := newSim(t)
+func TestAutoWaitsBeforeTryingAgainThenTellsPeople(t *testing.T) {
+	s := newSim(t, config.HealAuto)
 	s.check(t0, true, "")
 	s.check(t0.Add(30*time.Second), true, "")
-	s.done(t0.Add(31*time.Second), nil)
+	s.done(t0.Add(31*time.Second), nil, false) // verify until 2m31s, then a 1m pause
 	if st := s.check(t0.Add(time.Minute), true, ""); st.Send != nil || st.Start {
 		t.Fatalf("while verifying: %+v, want to wait", st)
 	}
-	st := s.check(t0.Add(31*time.Second+2*time.Minute), true, "")
+	if st := s.check(t0.Add(3*time.Minute), true, ""); st.Start {
+		t.Fatalf("during the pause after a fix that did not help: %+v", st)
+	}
+	st := s.check(t0.Add(3*time.Minute+31*time.Second), true, "")
 	if !st.Start || st.Attempt != 2 || st.Send == nil || st.Send.Kind != engine.EventFiring ||
 		!strings.Contains(st.Note, "still fails, so it tries again (2 of 3)") {
-		t.Fatalf("after a failed fix: %+v", st)
+		t.Fatalf("second try: %+v", st)
 	}
-	s.done(t0.Add(3*time.Minute), nil)
-	if st := s.check(t0.Add(3*time.Minute+10*time.Second), false, ""); st.Kind != "" || st.Send.Kind != engine.EventResolved ||
-		!strings.Contains(st.Note, "pulse restarted nginx at") {
-		t.Fatalf("fixed by the second try: %+v (an ordinary resolved message, since the failure was already sent)", st)
+	s.done(t0.Add(4*time.Minute), nil, false)
+	if st := s.check(t0.Add(4*time.Minute+10*time.Second), false, ""); st.Kind != alert.KindHealed ||
+		st.Send.Kind != engine.EventResolved || !strings.Contains(st.Note, "pulse restarted nginx at") {
+		t.Fatalf("fixed by the second try: %+v", st)
 	}
 }
 
-func TestPulseGivesUpAfterItsAttemptsAndSaysSoOnce(t *testing.T) {
-	s := newSim(t)
-	at := t0
-	s.check(at, true, "")
-	for i := 1; i <= 3; i++ {
-		at = at.Add(30 * time.Second)
-		if st := s.check(at, true, ""); !st.Start || st.Attempt != i {
-			t.Fatalf("try %d: %+v", i, st)
-		}
-		s.done(at, errors.New("unit failed to start"))
+func TestAutoSwitchesToAskAfterTwoFixesThatDidNotHelp(t *testing.T) {
+	s := newSim(t, config.HealAuto)
+	s.check(t0, true, "")
+	s.check(t0.Add(30*time.Second), true, "")
+	s.done(t0.Add(31*time.Second), nil, false)
+	s.check(t0.Add(3*time.Minute+31*time.Second), true, "")
+	s.done(t0.Add(4*time.Minute), nil, false) // verify until 6m
+	if st := s.check(t0.Add(5*time.Minute), true, ""); st.Start || st.Send != nil {
+		t.Fatalf("while verifying: %+v", st)
 	}
-	at = at.Add(time.Second)
-	st := s.check(at, true, "")
-	if st.Start || st.Kind != alert.KindHealFailed || st.Send == nil ||
-		!strings.Contains(st.Note, "tried to restart nginx 3 times in 1h and it still fails") ||
-		!strings.Contains(st.Note, "unit failed to start") {
-		t.Fatalf("give up: %+v", st)
+	// No pause before asking: only automatic fixes wait between tries.
+	st := s.check(t0.Add(7*time.Minute), true, "")
+	if st.Start || st.Kind != alert.KindHealFailed || st.Offered != "fix1" || st.Send == nil ||
+		!strings.Contains(st.Note, "restarted nginx 2 times and it still fails, so the next fix waits for your approval") ||
+		!strings.Contains(st.Note, "Approve it with sudo pulse fix approve web") {
+		t.Fatalf("after two fixes: %+v", st)
 	}
-	if st := s.check(at.Add(time.Minute), true, ""); st.Send != nil || st.Start {
-		t.Fatalf("after giving up: %+v, want quiet until the cooldown repeats", st)
+	if s.runs != 2 {
+		t.Fatalf("ran %d fixes, want 2 before asking", s.runs)
 	}
-	if st := s.check(at.Add(2*time.Minute), false, ""); st.Send == nil || st.Send.Kind != engine.EventResolved {
-		t.Fatalf("recovered after giving up: %+v", st)
+	if _, err := s.tr.Approve("web", "fix1"); err != nil {
+		t.Fatal(err)
 	}
-	// A new problem within the hour has no attempts left: it gives up at once.
-	s.check(at.Add(10*time.Minute), true, "")
-	if st := s.check(at.Add(11*time.Minute), true, ""); st.Start || st.Kind != alert.KindHealFailed {
-		t.Fatalf("new problem, no attempts left: %+v", st)
+	if st := s.check(t0.Add(7*time.Minute+2*time.Second), true, ""); !st.Start || !st.Approved || st.Attempt != 3 {
+		t.Fatalf("approved: %+v", st)
+	}
+	s.done(t0.Add(7*time.Minute+5*time.Second), nil, true)
+	if st := s.check(t0.Add(8*time.Minute), false, ""); st.Kind != alert.KindHealed || !strings.Contains(st.Note, "after your approval") {
+		t.Fatalf("fixed after approval: %+v", st)
 	}
 }
+
+func TestTheServerWideCapSendsTheFixForApproval(t *testing.T) {
+	s := newSim(t, config.HealAuto)
+	s.tr.SetLimit(1)
+	s.check(t0, true, "")
+	s.check(t0.Add(30*time.Second), true, "")
+	s.done(t0.Add(31*time.Second), nil, false)
+	st := s.check(t0.Add(4*time.Minute), true, "")
+	if st.Start || st.Offered == "" || !strings.Contains(st.Note, "limit of 1 automatic fixes an hour") {
+		t.Fatalf("server cap: %+v", st)
+	}
+}
+
+func TestUsedUpTriesSendTheFixForApproval(t *testing.T) {
+	s := newSim(t, config.HealAuto)
+	s.p.Attempts = 1
+	s.check(t0, true, "")
+	s.check(t0.Add(30*time.Second), true, "")
+	s.done(t0.Add(31*time.Second), nil, false)
+	st := s.check(t0.Add(4*time.Minute), true, "")
+	if st.Start || st.Offered == "" || !strings.Contains(st.Note, "used the 1 automatic tries allowed in 1h") {
+		t.Fatalf("tries used: %+v", st)
+	}
+}
+
+// ── ask ──────────────────────────────────────────────────────────────────────
+
+func TestAskOffersTheFixWithTheFirstAlertAndRunsItOnApproval(t *testing.T) {
+	s := newSim(t, config.HealAsk)
+	if st := s.check(t0, true, ""); st.Send != nil {
+		t.Fatalf("first bad reading: %+v", st)
+	}
+	st := s.check(t0.Add(30*time.Second), true, "")
+	if st.Start || st.Send == nil || st.Send.Kind != engine.EventFiring || st.Kind != "" || st.Offered != "fix1" ||
+		!strings.Contains(st.Note, "A fix is waiting for your approval: restart nginx.") {
+		t.Fatalf("offer: %+v", st)
+	}
+	if st := s.check(t0.Add(time.Minute), true, ""); st.Start || st.Send != nil {
+		t.Fatalf("waiting: %+v, want nothing until someone answers", st)
+	}
+	if _, err := s.tr.Approve("web", "old-id"); !errors.Is(err, ErrNotWaiting) {
+		t.Fatalf("approving another fix: %v", err)
+	}
+	if hs := s.tr.Status("web", s.p, t0.Add(time.Minute)); hs.Waiting == nil || hs.Waiting.ID != "fix1" || hs.Mode != config.HealAsk {
+		t.Fatalf("status while waiting: %+v", hs)
+	}
+	w, err := s.tr.Approve("web", "fix1")
+	if err != nil || w.ID != "fix1" {
+		t.Fatalf("approve: %+v %v", w, err)
+	}
+	if st := s.check(t0.Add(2*time.Minute), true, ""); !st.Start || !st.Approved || st.Send != nil {
+		t.Fatalf("after approval: %+v", st)
+	}
+	s.done(t0.Add(2*time.Minute+3*time.Second), nil, true)
+	if st := s.check(t0.Add(2*time.Minute+10*time.Second), false, ""); st.Kind != alert.KindHealed ||
+		!strings.Contains(st.Note, "pulse restarted nginx at") || !strings.Contains(st.Note, "after your approval and it works again") {
+		t.Fatalf("fixed: %+v", st)
+	}
+	if s.runs != 1 || len(s.sent) != 2 {
+		t.Fatalf("ran %d, sent %d: want one fix, the offer and the healed message", s.runs, len(s.sent))
+	}
+}
+
+func TestAnApprovedFixThatDoesNotHelpOffersAnother(t *testing.T) {
+	s := newSim(t, config.HealAsk)
+	s.check(t0, true, "")
+	s.check(t0.Add(30*time.Second), true, "")
+	s.tr.Approve("web", "")
+	s.check(t0.Add(31*time.Second), true, "")
+	s.done(t0.Add(32*time.Second), nil, true)
+	st := s.check(t0.Add(3*time.Minute), true, "")
+	if st.Start || st.Kind != alert.KindHealFailed || st.Offered != "fix2" ||
+		!strings.Contains(st.Note, "pulse did the fix (restarted nginx) but it still fails.") {
+		t.Fatalf("after an approved fix that did not help: %+v", st)
+	}
+}
+
+func TestDismissStopsOffersUntilTheProblemEnds(t *testing.T) {
+	s := newSim(t, config.HealAsk)
+	s.check(t0, true, "")
+	s.check(t0.Add(30*time.Second), true, "")
+	if _, err := s.tr.Dismiss("web", "fix1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.tr.Approve("web", "fix1"); !errors.Is(err, ErrNotWaiting) {
+		t.Fatalf("a dismissed fix was approved: %v", err)
+	}
+	for _, at := range []time.Duration{time.Minute, 20 * time.Minute} {
+		if st := s.check(t0.Add(at), true, ""); st.Start || st.Offered != "" {
+			t.Fatalf("after dismiss at %v: %+v", at, st)
+		}
+	}
+	s.check(t0.Add(30*time.Minute), false, "")
+	s.check(t0.Add(40*time.Minute), true, "")
+	if st := s.check(t0.Add(41*time.Minute), true, ""); st.Offered == "" {
+		t.Fatalf("a new problem: %+v, want a new offer", st)
+	}
+}
+
+func TestAWaitingFixIsPreparedAfreshAfterAnHour(t *testing.T) {
+	s := newSim(t, config.HealAsk)
+	s.check(t0, true, "")
+	s.check(t0.Add(30*time.Second), true, "")
+	if st := s.check(t0.Add(30*time.Second+WaitFor), true, ""); st.Start {
+		t.Fatalf("expiry must not run anything: %+v", st)
+	}
+	if _, err := s.tr.Approve("web", "fix1"); !errors.Is(err, ErrNotWaiting) {
+		t.Fatalf("the expired fix was approved: %v", err)
+	}
+	if hs := s.tr.Status("web", s.p, t0.Add(31*time.Second+WaitFor)); hs.Waiting == nil || hs.Waiting.ID != "fix2" {
+		t.Fatalf("status after expiry: %+v", hs)
+	}
+}
+
+func TestRecoveryWhileAFixWaitsSaysItIsNoLongerNeeded(t *testing.T) {
+	s := newSim(t, config.HealAsk)
+	s.check(t0, true, "")
+	s.check(t0.Add(30*time.Second), true, "")
+	st := s.check(t0.Add(time.Minute), false, "")
+	if st.Send == nil || st.Send.Kind != engine.EventResolved || !strings.Contains(st.Note, "no longer needed") {
+		t.Fatalf("recovered while waiting: %+v", st)
+	}
+	if hs := s.tr.Status("web", s.p, t0.Add(time.Minute)); hs.Waiting != nil {
+		t.Fatalf("the fix still waits after recovery: %+v", hs)
+	}
+}
+
+// ── both ─────────────────────────────────────────────────────────────────────
 
 func TestABlipShorterThanTheDelaySendsNothing(t *testing.T) {
-	s := newSim(t)
-	s.check(t0, true, "")
-	s.check(t0.Add(10*time.Second), false, "")
-	if len(s.sent) != 0 || s.runs != 0 {
-		t.Fatalf("sent %v, ran %d: a 10-second blip is not worth a fix or an alert", s.sent, s.runs)
+	for _, mode := range []string{config.HealAsk, config.HealAuto} {
+		s := newSim(t, mode)
+		s.check(t0, true, "")
+		s.check(t0.Add(10*time.Second), false, "")
+		if len(s.sent) != 0 || s.runs != 0 {
+			t.Fatalf("%s: sent %v, ran %d: a 10-second blip is not worth a fix or an alert", mode, s.sent, s.runs)
+		}
 	}
 }
 
-func TestNoFixInAMaintenanceWindow(t *testing.T) {
-	s := newSim(t)
-	// The alert goes out at once, as without a heal rule: pulse is not going to try.
-	st := s.check(t0, true, "the maintenance window deploys is open")
-	if st.Start || st.Send == nil || !strings.Contains(st.Note, "did not try to fix it: the maintenance window deploys is open") {
-		t.Fatalf("maintenance: %+v", st)
+func TestBlockedMeansNoFixAndNoOffer(t *testing.T) {
+	for _, mode := range []string{config.HealAsk, config.HealAuto} {
+		s := newSim(t, mode)
+		// The alert goes out at once, as without a heal rule: pulse is not going to act.
+		st := s.check(t0, true, "mysql is failing too, which is the likely cause")
+		if st.Start || st.Offered != "" || st.Send == nil ||
+			!strings.Contains(st.Note, "did not try to fix it: mysql is failing too, which is the likely cause") {
+			t.Fatalf("%s blocked: %+v", mode, st)
+		}
+		if st := s.check(t0.Add(time.Minute), true, "mysql is failing too, which is the likely cause"); st.Send != nil || st.Start {
+			t.Fatalf("%s still blocked: %+v", mode, st)
+		}
+		if st := s.check(t0.Add(2*time.Minute), true, ""); (mode == config.HealAuto) != st.Start || (mode == config.HealAsk) == (st.Offered == "") {
+			t.Fatalf("%s once the cause works: %+v", mode, st)
+		}
 	}
-	if st := s.check(t0.Add(time.Minute), true, "the maintenance window deploys is open"); st.Start || st.Send != nil {
-		t.Fatalf("still in maintenance: %+v", st)
-	}
-	if s.runs != 0 {
-		t.Fatal("a fix ran in a maintenance window")
+}
+
+func TestAnApprovedFixRunsEvenWhenBlocked(t *testing.T) {
+	s := newSim(t, config.HealAsk)
+	s.check(t0, true, "")
+	s.check(t0.Add(30*time.Second), true, "")
+	s.tr.Approve("web", "fix1")
+	if st := s.check(t0.Add(time.Minute), true, "the maintenance window deploys is open"); !st.Start || !st.Approved {
+		t.Fatalf("a person's approval in a maintenance window: %+v", st)
 	}
 }
 
 func TestAMissingRightGivesUpAtOnce(t *testing.T) {
-	s := newSim(t)
+	s := newSim(t, config.HealAuto)
 	s.check(t0, true, "")
 	s.check(t0.Add(30*time.Second), true, "")
-	s.done(t0.Add(31*time.Second), errors.New("pulse is not allowed to restart this service: nginx"))
+	s.done(t0.Add(31*time.Second), errors.New("pulse is not allowed to restart this service: nginx"), false)
 	st := s.check(t0.Add(32*time.Second), true, "")
-	if st.Start || st.Kind != alert.KindHealFailed || !strings.Contains(st.Note, "could not restart nginx: pulse is not allowed") {
+	if st.Start || st.Offered != "" || st.Kind != alert.KindHealFailed || !strings.Contains(st.Note, "could not restart nginx: pulse is not allowed") {
 		t.Fatalf("missing right: %+v", st)
 	}
 	if s.runs != 1 {
@@ -159,78 +314,13 @@ func TestAMissingRightGivesUpAtOnce(t *testing.T) {
 	}
 }
 
-func TestTheServerWideCapStopsFixes(t *testing.T) {
-	s := newSim(t)
-	s.tr.SetLimit(1)
-	s.p.Attempts = 5
-	s.check(t0, true, "")
-	s.check(t0.Add(30*time.Second), true, "")
-	s.done(t0.Add(31*time.Second), nil)
-	st := s.check(t0.Add(3*time.Minute), true, "")
-	if st.Start || st.Kind != alert.KindHealFailed || !strings.Contains(st.Note, "limit of 1 fixes an hour") {
-		t.Fatalf("server cap: %+v", st)
-	}
-}
-
-func TestAFixThatEndsAfterRecoveryLeavesNoWait(t *testing.T) {
-	s := newSim(t)
-	s.check(t0, true, "")
-	s.check(t0.Add(30*time.Second), true, "")  // fix starts
-	s.check(t0.Add(32*time.Second), false, "") // it came back by itself meanwhile
-	s.done(t0.Add(40*time.Second), nil)        // the fix answers late
-	s.check(t0.Add(50*time.Second), true, "")  // a new problem
-	if st := s.check(t0.Add(80*time.Second), true, ""); !st.Start {
-		t.Fatalf("new problem after a late fix: %+v, want a new try (no leftover wait)", st)
-	}
-}
-
-func TestStatus(t *testing.T) {
-	s := newSim(t)
-	s.check(t0, true, "")
-	s.check(t0.Add(30*time.Second), true, "")
-	if hs := s.tr.Status("web", s.p, t0.Add(31*time.Second)); !hs.Healing || hs.AttemptsUsed != 1 || hs.Attempts != 3 {
-		t.Fatalf("while fixing: %+v", hs)
-	}
-	s.done(t0.Add(35*time.Second), errors.New("boom"))
-	hs := s.tr.Status("web", s.p, t0.Add(36*time.Second))
-	if hs.Healing || hs.LastResult != "Tried to restart nginx (attempt 0): boom" || hs.LastAt.IsZero() {
-		t.Fatalf("after a failed fix: %+v", hs)
-	}
-}
-
-func TestPlanFor(t *testing.T) {
-	m := config.Monitor{ID: "web", Type: "service", Service: "nginx", For: config.Duration(2 * time.Minute),
-		Heal: &config.Heal{Action: config.HealRestart}}
-	p, ok := PlanFor(m)
-	if !ok || p.After != 2*time.Minute || p.Attempts != 3 || p.Verify != 2*time.Minute || p.What != "restart nginx" {
-		t.Fatalf("plan = %+v", p)
-	}
-	m.For = 0
-	if p, _ := PlanFor(m); p.After != MinDelay {
-		t.Fatalf("for 0: after = %v, want the minimum %v", p.After, MinDelay)
-	}
-	c := config.Monitor{ID: "c", Type: "container", Container: "api", Heal: &config.Heal{Action: config.HealRestart}}
-	if p, _ := PlanFor(c); p.Done != "restarted the container api" {
-		t.Fatalf("container: %+v", p)
-	}
-	r := config.Monitor{ID: "q", Type: "command", Run: []string{"x"}, Heal: &config.Heal{Action: config.HealRun, Run: []string{"/usr/local/bin/drain-queue", "--all"}}}
-	if p, _ := PlanFor(r); p.What != "run drain-queue" {
-		t.Fatalf("run: %+v", p)
-	}
-	off := false
-	m.Enabled = &off
-	if _, ok := PlanFor(m); ok {
-		t.Fatal("a monitor that is off has no plan")
-	}
-}
-
-// Bug scan 2026-10-17: a missing right belongs to one problem. Once an admin grants it,
-// the next problem is tried again instead of being given up at once.
+// A missing right belongs to one problem. Once an admin grants it, the next problem
+// is tried again instead of being given up at once.
 func TestAMissingRightDoesNotStickToTheNextProblem(t *testing.T) {
-	s := newSim(t)
+	s := newSim(t, config.HealAuto)
 	s.check(t0, true, "")
 	s.check(t0.Add(30*time.Second), true, "")
-	s.done(t0.Add(31*time.Second), errors.New("pulse is not allowed to restart this service: nginx"))
+	s.done(t0.Add(31*time.Second), errors.New("pulse is not allowed to restart this service: nginx"), false)
 	s.check(t0.Add(32*time.Second), true, "") // gives up
 	s.check(t0.Add(time.Minute), false, "")   // it works again (someone fixed it by hand)
 	s.check(t0.Add(10*time.Minute), true, "")
@@ -239,23 +329,68 @@ func TestAMissingRightDoesNotStickToTheNextProblem(t *testing.T) {
 	}
 }
 
-// Bug scan: a reminder that is due while a fix runs, after the alert went out, is sent.
-func TestAReminderDuringAFixIsNotSwallowed(t *testing.T) {
-	s := newSim(t)
+func TestAFixThatEndsAfterRecoveryLeavesNoWait(t *testing.T) {
+	s := newSim(t, config.HealAuto)
+	s.check(t0, true, "")
+	s.check(t0.Add(30*time.Second), true, "")  // fix starts
+	s.check(t0.Add(32*time.Second), false, "") // it came back by itself meanwhile
+	s.done(t0.Add(40*time.Second), nil, false) // the fix answers late
+	s.check(t0.Add(50*time.Second), true, "")  // a new problem
+	if st := s.check(t0.Add(80*time.Second), true, ""); !st.Start {
+		t.Fatalf("new problem after a late fix: %+v, want a new try (no leftover wait)", st)
+	}
+}
+
+func TestStatus(t *testing.T) {
+	s := newSim(t, config.HealAuto)
 	s.check(t0, true, "")
 	s.check(t0.Add(30*time.Second), true, "")
-	s.done(t0.Add(31*time.Second), nil)
-	s.check(t0.Add(31*time.Second+2*time.Minute), true, "") // second try: the alert goes out now
-	remind := &engine.Event{Kind: engine.EventFiring, Monitor: "web", Detail: "Still failing after the silence ended. stopped", At: t0.Add(3 * time.Minute)}
-	st := s.tr.Step("web", s.p, t0.Add(3*time.Minute), s.eng.Get("web"), remind, "")
+	if hs := s.tr.Status("web", s.p, t0.Add(31*time.Second)); !hs.Healing || hs.AttemptsUsed != 1 || hs.Attempts != 3 ||
+		hs.Mode != config.HealAuto || hs.What != "restart nginx" {
+		t.Fatalf("while fixing: %+v", hs)
+	}
+	s.done(t0.Add(35*time.Second), errors.New("boom"), false)
+	hs := s.tr.Status("web", s.p, t0.Add(36*time.Second))
+	if hs.Healing || hs.LastResult != "Tried to restart nginx (attempt 0): boom" || hs.LastAt.IsZero() {
+		t.Fatalf("after a failed fix: %+v", hs)
+	}
+}
+
+func TestPlanFor(t *testing.T) {
+	m := config.Monitor{ID: "web", Type: "service", Service: "nginx", For: config.Duration(2 * time.Minute),
+		Heal: &config.Heal{Steps: []config.HealStep{{RestartService: []string{"nginx"}}}}}
+	p, ok := PlanFor(m)
+	if !ok || p.After != 2*time.Minute || p.Attempts != 3 || p.Verify != 2*time.Minute || p.What != "restart nginx" || p.Mode != config.HealAsk {
+		t.Fatalf("plan = %+v", p)
+	}
+	m.For = 0
+	if p, _ := PlanFor(m); p.After != MinDelay {
+		t.Fatalf("for 0: after = %v, want the minimum %v", p.After, MinDelay)
+	}
+	off := false
+	m.Enabled = &off
+	if _, ok := PlanFor(m); ok {
+		t.Fatal("a monitor that is off has no plan")
+	}
+}
+
+// A reminder that is due while a fix runs, after the alert went out, is sent.
+func TestAReminderDuringAFixIsNotSwallowed(t *testing.T) {
+	s := newSim(t, config.HealAuto)
+	s.check(t0, true, "")
+	s.check(t0.Add(30*time.Second), true, "")
+	s.done(t0.Add(31*time.Second), nil, false)
+	s.check(t0.Add(3*time.Minute+31*time.Second), true, "") // second try: the alert goes out now
+	remind := &engine.Event{Kind: engine.EventFiring, Monitor: "web", Detail: "Still failing after the silence ended. stopped", At: t0.Add(4 * time.Minute)}
+	st := s.tr.Step("web", s.p, t0.Add(4*time.Minute), s.eng.Get("web"), remind, "")
 	if st.Send != remind || !strings.Contains(st.Note, "pulse is trying to restart nginx") {
 		t.Fatalf("reminder while fixing: %+v", st)
 	}
 }
 
-// Bug scan: a flapping notice is not replaced by the held failure it describes.
+// A flapping notice is not replaced by the held failure it describes.
 func TestAFlappingNoticeWinsOverAHeldFailure(t *testing.T) {
-	s := newSim(t)
+	s := newSim(t, config.HealAuto)
 	s.check(t0, true, "") // held
 	flap := &engine.Event{Kind: engine.EventFlapping, Monitor: "web", Detail: "It changed between failing and recovered 5 times", At: t0.Add(5 * time.Second)}
 	st := s.tr.Step("web", s.p, t0.Add(5*time.Second), s.eng.Get("web"), flap, "it keeps switching between failing and working")
@@ -264,10 +399,10 @@ func TestAFlappingNoticeWinsOverAHeldFailure(t *testing.T) {
 	}
 }
 
-// Bug scan: a recovery the engine did not announce (it was flapping) still ends the problem,
+// A recovery the engine did not announce (it was flapping) still ends the problem,
 // so the next problem starts clean instead of reusing the old held alert.
 func TestAnUnannouncedRecoveryEndsTheProblem(t *testing.T) {
-	s := newSim(t)
+	s := newSim(t, config.HealAuto)
 	s.check(t0, true, "") // held, detail "stopped"
 	ok := engine.State{Status: engine.OK, LastChecked: t0.Add(10 * time.Second)}
 	s.tr.Step("web", s.p, t0.Add(10*time.Second), ok, nil, "")
@@ -276,9 +411,9 @@ func TestAnUnannouncedRecoveryEndsTheProblem(t *testing.T) {
 	}
 }
 
-// Bug scan: when a heal rule is removed while its alert is held, the alert is handed back.
+// When a heal rule is removed while its alert is held, the alert is handed back.
 func TestTakeReturnsAHeldAlert(t *testing.T) {
-	s := newSim(t)
+	s := newSim(t, config.HealAsk)
 	s.check(t0, true, "")
 	if got := s.tr.Take("web"); got == nil || got.Kind != engine.EventFiring {
 		t.Fatalf("take = %+v, want the held firing alert", got)
@@ -288,11 +423,11 @@ func TestTakeReturnsAHeldAlert(t *testing.T) {
 	}
 }
 
-// Bug scan: a problem that started before pulse did (pulse restarted) was already reported:
-// a fix that works then is an ordinary resolved message, not "it failed ... fixed".
-func TestAProblemFromBeforeARestartIsNotCalledFixedOutOfTheBlue(t *testing.T) {
+// A problem that started before pulse did (pulse restarted) was already reported: a
+// fix that works then says what pulse did, not "it failed ..." out of the blue.
+func TestAProblemFromBeforeARestartIsNotRetold(t *testing.T) {
 	tr := NewTracker(10)
-	p := plan()
+	p := plan(config.HealAuto)
 	firing := engine.State{Status: engine.Firing, ProblemSince: t0.Add(-time.Hour), Detail: "stopped"}
 	if st := tr.Step("web", p, t0, firing, nil, ""); !st.Start {
 		t.Fatalf("after a restart: %+v, want a try", st)
@@ -300,7 +435,20 @@ func TestAProblemFromBeforeARestartIsNotCalledFixedOutOfTheBlue(t *testing.T) {
 	tr.Done("web", Outcome{At: t0.Add(time.Second)}, p.Verify)
 	resolved := &engine.Event{Kind: engine.EventResolved, Monitor: "web", Detail: "running", At: t0.Add(10 * time.Second)}
 	st := tr.Step("web", p, t0.Add(10*time.Second), engine.State{Status: engine.OK}, resolved, "")
-	if st.Kind != "" || st.Send != resolved || !strings.Contains(st.Note, "pulse restarted nginx at") {
+	if st.Send != resolved || strings.Contains(st.Note, "It failed") || !strings.Contains(st.Note, "pulse restarted nginx at") {
 		t.Fatalf("resolved: %+v", st)
+	}
+}
+
+// A monitor that recovers long after a fix that did not help is not credited to the fix.
+func TestALateRecoveryIsNotCalledFixed(t *testing.T) {
+	s := newSim(t, config.HealAsk)
+	s.check(t0, true, "")
+	s.check(t0.Add(30*time.Second), true, "")
+	s.tr.Approve("web", "")
+	s.check(t0.Add(31*time.Second), true, "")
+	s.done(t0.Add(32*time.Second), nil, true)
+	if st := s.check(t0.Add(30*time.Minute), false, ""); st.Kind == alert.KindHealed {
+		t.Fatalf("recovered 30 minutes later: %+v, want an ordinary resolved message", st)
 	}
 }

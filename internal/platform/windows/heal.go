@@ -60,7 +60,7 @@ func openService(name string, access uint32) (*mgr.Service, func(), error) {
 func (Platform) RestartService(ctx context.Context, name string) error {
 	s, done, err := openService(name, windows.SERVICE_STOP|windows.SERVICE_START|windows.SERVICE_QUERY_STATUS)
 	if errors.Is(err, windows.ERROR_ACCESS_DENIED) {
-		return fmt.Errorf("%w: %s. Run pulse install as Administrator, which grants it for monitors with heal: restart", host.ErrHealNotAllowed, name)
+		return fmt.Errorf("%w: %s. Run pulse install as Administrator, which grants it for the services in restart_service heal steps", host.ErrHealNotAllowed, name)
 	}
 	if err != nil {
 		return err

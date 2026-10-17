@@ -50,45 +50,76 @@ func helper(code int) []string {
 	return []string{os.Args[0], "-test.run=^TestHelperExit$", "--", strconv.Itoa(code)}
 }
 
-func TestFixRestartsTheServiceTheMonitorWatches(t *testing.T) {
+func plannedFix(t *testing.T, steps ...config.HealStep) Plan {
+	t.Helper()
+	m := config.Monitor{ID: "web", Type: "http", Heal: &config.Heal{Steps: steps, Timeout: config.Duration(30 * time.Second)}}
+	p, ok := PlanFor(m)
+	if !ok {
+		t.Fatal("no plan")
+	}
+	return p
+}
+
+func TestFixRunsTheStepsInOrder(t *testing.T) {
 	f := &fakePlatform{}
-	m := config.Monitor{ID: "web", Type: "service", Service: "nginx", Heal: &config.Heal{Action: config.HealRestart}}
-	p, _ := PlanFor(m)
-	if o := (Fixer{Platform: f}).Fix(context.Background(), m, p); o.Err != nil || o.At.IsZero() {
+	p := plannedFix(t, config.HealStep{RestartService: []string{"php8.3-fpm", "nginx"}}, config.HealStep{Run: helper(0)})
+	o := (Fixer{Platform: f, OutputLimit: 1024}).Fix(context.Background(), p)
+	if o.Err != nil || o.At.IsZero() || !strings.Contains(o.Output, "drained 3 jobs") {
 		t.Fatalf("outcome = %+v", o)
 	}
-	if strings.Join(f.restarted, ",") != "nginx" {
+	if strings.Join(f.restarted, ",") != "php8.3-fpm,nginx" {
 		t.Fatalf("restarted %v", f.restarted)
+	}
+}
+
+func TestFixStopsAtTheFirstStepThatFails(t *testing.T) {
+	f := &fakePlatform{err: errors.New("Job for php8.3-fpm.service failed")}
+	p := plannedFix(t, config.HealStep{RestartService: []string{"php8.3-fpm", "nginx"}}, config.HealStep{Run: helper(0)})
+	o := (Fixer{Platform: f, OutputLimit: 1024}).Fix(context.Background(), p)
+	if o.Err == nil || o.Fatal || !strings.Contains(o.Err.Error(), "restart php8.3-fpm: Job for") || o.Output != "" {
+		t.Fatalf("outcome = %+v", o)
+	}
+	if strings.Join(f.restarted, ",") != "php8.3-fpm" {
+		t.Fatalf("restarted %v, want to stop after the first failure", f.restarted)
 	}
 }
 
 func TestAMissingRightIsFatal(t *testing.T) {
 	f := &fakePlatform{err: fmt.Errorf("%w: nginx", host.ErrHealNotAllowed)}
-	m := config.Monitor{ID: "web", Type: "service", Service: "nginx", Heal: &config.Heal{Action: config.HealRestart}}
-	p, _ := PlanFor(m)
-	if o := (Fixer{Platform: f}).Fix(context.Background(), m, p); !o.Fatal || !errors.Is(o.Err, host.ErrHealNotAllowed) {
+	p := plannedFix(t, config.HealStep{RestartService: []string{"nginx"}})
+	if o := (Fixer{Platform: f}).Fix(context.Background(), p); !o.Fatal || !errors.Is(o.Err, host.ErrHealNotAllowed) {
 		t.Fatalf("outcome = %+v", o)
-	}
-	f.err = errors.New("Job for nginx.service failed")
-	if o := (Fixer{Platform: f}).Fix(context.Background(), m, p); o.Fatal || o.Err == nil {
-		t.Fatalf("a failed start may work next time: %+v", o)
 	}
 }
 
-func TestARunFixSucceedsOrSaysWhy(t *testing.T) {
-	m := config.Monitor{ID: "q", Type: "command", Run: []string{"x"}}
+func TestARunStepSucceedsOrSaysWhy(t *testing.T) {
 	for _, tc := range []struct {
 		code int
 		ok   bool
 	}{{0, true}, {3, false}} {
-		m.Heal = &config.Heal{Action: config.HealRun, Run: helper(tc.code), Timeout: config.Duration(30 * time.Second)}
-		p, _ := PlanFor(m)
-		o := (Fixer{Platform: &fakePlatform{}, OutputLimit: 1024}).Fix(context.Background(), m, p)
+		p := plannedFix(t, config.HealStep{Run: helper(tc.code)})
+		o := (Fixer{Platform: &fakePlatform{}, OutputLimit: 1024}).Fix(context.Background(), p)
 		if (o.Err == nil) != tc.ok || o.Fatal || !strings.Contains(o.Output, "drained 3 jobs") {
 			t.Fatalf("exit %d: %+v", tc.code, o)
 		}
 		if !tc.ok && !strings.Contains(o.Err.Error(), "exited with code 3: drained 3 jobs") {
 			t.Fatalf("exit 3: %v", o.Err)
 		}
+	}
+}
+
+func TestPlanWordsAndModes(t *testing.T) {
+	p := plannedFix(t, config.HealStep{RestartService: []string{"php8.3-fpm", "nginx"}},
+		config.HealStep{RestartContainer: []string{"api"}}, config.HealStep{Run: []string{`C:\fix\clear.ps1`}})
+	if p.What != "restart php8.3-fpm and nginx, then restart the container api, then run clear.ps1" ||
+		p.Done != "restarted php8.3-fpm and nginx, then restarted the container api, then ran clear.ps1" {
+		t.Fatalf("words: %q / %q", p.What, p.Done)
+	}
+	if p.Mode != config.HealAsk || p.Approve != "sudo pulse fix approve web" {
+		t.Fatalf("plan = %+v, want ask by default", p)
+	}
+	off := config.Monitor{ID: "x", Type: "http", Heal: &config.Heal{Mode: config.HealOff, Steps: []config.HealStep{{Run: []string{"x"}}}}}
+	if _, ok := PlanFor(off); ok {
+		t.Fatal("mode off must have no plan")
 	}
 }

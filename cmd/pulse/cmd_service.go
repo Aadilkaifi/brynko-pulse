@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -139,14 +140,19 @@ func install(p platform.Platform, cfgDir, dataDir string, allowDocker, discoverN
 	return res, initRes, added, err
 }
 
-// healServices lists the services monitors restart for self-healing.
+// healServices lists the services monitors' fixes restart, each once, sorted.
 func healServices(cfg *config.Config) []string {
+	seen := map[string]bool{}
 	var out []string
 	for _, m := range cfg.Monitors {
-		if m.HealsService() {
-			out = append(out, m.Service)
+		for _, s := range m.HealServices() {
+			if !seen[s] {
+				seen[s] = true
+				out = append(out, s)
+			}
 		}
 	}
+	sort.Strings(out)
 	return out
 }
 

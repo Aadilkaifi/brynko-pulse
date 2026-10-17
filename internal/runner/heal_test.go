@@ -6,6 +6,7 @@ package runner
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Aadilkaifi/brynko-pulse/internal/alert"
 	"github.com/Aadilkaifi/brynko-pulse/internal/heal"
@@ -22,12 +24,23 @@ import (
 	"github.com/Aadilkaifi/brynko-pulse/internal/store"
 )
 
-// TestHelperTouch is not a test: a run fix starts this binary with "--" and a
-// path, and it creates the file, which is what fixes the monitor below.
+// TestHelperTouch is not a test: a fix starts this binary with "-- touch path" and
+// it creates the file, which is what fixes the monitor below. With "-- exists path"
+// it is the check: exit 1 while the file is missing.
 func TestHelperTouch(t *testing.T) {
 	for i, a := range os.Args {
-		if a == "--" && i+1 < len(os.Args) {
-			if err := os.WriteFile(os.Args[i+1], []byte("restored"), 0o600); err != nil {
+		if a != "--" || i+2 >= len(os.Args) {
+			continue
+		}
+		switch path := os.Args[i+2]; os.Args[i+1] {
+		case "touch":
+			if err := os.WriteFile(path, []byte("restored"), 0o600); err != nil {
+				os.Exit(1)
+			}
+			os.Exit(0)
+		case "exists":
+			if _, err := os.Stat(path); err != nil {
+				fmt.Println("missing")
 				os.Exit(1)
 			}
 			os.Exit(0)
@@ -35,9 +48,10 @@ func TestHelperTouch(t *testing.T) {
 	}
 }
 
-// End to end: a file goes missing, the heal rule runs a program that puts it back,
-// and people get exactly one message: it broke and pulse fixed it.
-func TestRunHealsAndSendsOneMessage(t *testing.T) {
+// healSetup starts pulse with a command monitor that fails while a file is missing,
+// and a heal rule whose step puts the file back.
+func healSetup(t *testing.T, mode string) (dataDir, watched string, alerts func() []alert.Alert, stop func()) {
+	t.Helper()
 	old := heal.MinDelay
 	heal.MinDelay = 0
 	t.Cleanup(func() { heal.MinDelay = old })
@@ -51,16 +65,18 @@ func TestRunHealsAndSendsOneMessage(t *testing.T) {
 		got = append(got, a)
 		mu.Unlock()
 	}))
-	defer hook.Close()
+	t.Cleanup(hook.Close)
 
-	cfgDir, dataDir := t.TempDir(), t.TempDir()
-	watched := filepath.Join(t.TempDir(), "backup.tar")
-	run, _ := json.Marshal([]string{os.Args[0], "-test.run=^TestHelperTouch$", "--", watched})
+	cfgDir := t.TempDir()
+	dataDir = t.TempDir()
+	watched = filepath.Join(t.TempDir(), "backup.tar")
+	check, _ := json.Marshal([]string{os.Args[0], "-test.run=^TestHelperTouch$", "--", "exists", watched})
+	fix, _ := json.Marshal([]string{os.Args[0], "-test.run=^TestHelperTouch$", "--", "touch", watched})
 	writeFiles(t, cfgDir, map[string]string{
 		"pulse.yaml":    "version: 1\nserver_name: test-box\ndefaults:\n  notify: [hook]\n  interval: 1s\n",
 		"channels.yaml": "channels:\n  hook:\n    type: webhook\n    url: " + hook.URL + "\n",
-		"monitors/m.yaml": "monitors:\n  - id: backup\n    type: file\n    path: " + filepath.ToSlash(watched) +
-			"\n    alert_when: age > 1d\n    heal:\n      action: run\n      run: " + string(run) + "\n      verify: 1m\n",
+		"monitors/m.yaml": "monitors:\n  - id: backup\n    type: command\n    run: " + string(check) +
+			"\n    heal:\n      mode: " + mode + "\n      steps:\n        - run: " + string(fix) + "\n      verify: 1m\n",
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -69,40 +85,90 @@ func TestRunHealsAndSendsOneMessage(t *testing.T) {
 		done <- Run(ctx, Options{ConfigDir: cfgDir, DataDir: dataDir, Platform: platform.Current(),
 			Log: slog.New(slog.NewTextHandler(io.Discard, nil)), SkipSecurityCheck: true, Version: "test"})
 	}()
-
-	waitFor(t, func() bool { mu.Lock(); defer mu.Unlock(); return len(got) >= 1 })
-	cancel()
-	if err := <-done; err != nil {
-		t.Fatal(err)
+	alerts = func() []alert.Alert {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]alert.Alert(nil), got...)
 	}
+	stop = func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dataDir, watched, alerts, stop
+}
 
-	mu.Lock()
-	defer mu.Unlock()
-	if len(got) != 1 || got[0].Kind != alert.KindHealed || !strings.Contains(got[0].Heal, "does not exist") ||
+func historyKinds(t *testing.T, dataDir string) map[string]int {
+	t.Helper()
+	recs, _ := store.History(dataDir, 20)
+	kinds := map[string]int{}
+	for _, r := range recs {
+		kinds[r.Kind]++
+	}
+	return kinds
+}
+
+// Auto: the file goes missing, pulse runs the step that puts it back, and people get
+// exactly one message: it broke and pulse fixed it.
+func TestRunHealsByItselfAndSendsOneMessage(t *testing.T) {
+	dataDir, watched, alerts, stop := healSetup(t, "auto")
+	waitFor(t, func() bool { return len(alerts()) >= 1 })
+	stop()
+
+	got := alerts()
+	if len(got) != 1 || got[0].Kind != alert.KindHealed || !strings.Contains(got[0].Heal, "It failed (") ||
 		!strings.Contains(got[0].Heal, "pulse ran runner.test") {
 		t.Fatalf("alerts = %+v, want one healed message saying what broke and what pulse ran", got)
 	}
 	if _, err := os.Stat(watched); err != nil {
 		t.Fatalf("the fix did not run: %v", err)
 	}
-	recs, _ := store.History(dataDir, 10)
-	kinds := map[string]int{}
-	for _, r := range recs {
-		kinds[r.Kind]++
-	}
 	// The monitor may see the file back before the fix has written its own record, so
 	// only the records are checked, not their order.
-	if len(recs) != 2 || kinds["heal"] != 1 || kinds[alert.KindHealed] != 1 {
-		t.Fatalf("history = %+v, want one fix and one healed message", recs)
-	}
-	for _, r := range recs {
-		if r.Kind == alert.KindHealed && !strings.Contains(r.Detail, "It failed (") {
-			t.Fatalf("the healed line says %q, want what broke and what pulse did", r.Detail)
-		}
+	if k := historyKinds(t, dataDir); k["heal"] != 1 || k[alert.KindHealed] != 1 {
+		t.Fatalf("history kinds = %v, want one fix and one healed message", k)
 	}
 	snap, _ := store.ReadState(dataDir)
 	hs := snap.Monitors["backup"].Heal
-	if hs == nil || hs.Action != "run" || hs.AttemptsUsed != 1 || hs.Attempts != 3 || hs.LastAt.IsZero() {
+	if hs == nil || hs.Mode != "auto" || hs.AttemptsUsed != 1 || hs.Attempts != 3 || hs.LastAt.IsZero() {
 		t.Fatalf("heal status = %+v", hs)
+	}
+}
+
+// Ask: the alert says a fix is waiting; nothing runs until it is approved through the
+// same request files pulse fix uses; then the fix runs and people hear it worked.
+func TestRunWaitsForApprovalThenFixes(t *testing.T) {
+	dataDir, watched, alerts, stop := healSetup(t, "ask")
+	defer stop()
+	waitFor(t, func() bool { return len(alerts()) >= 1 })
+	first := alerts()[0]
+	if first.Kind != alert.KindFiring || !strings.Contains(first.Heal, "A fix is waiting for your approval: run runner.test") {
+		t.Fatalf("first alert = %+v", first)
+	}
+	if _, err := os.Stat(watched); err == nil {
+		t.Fatal("the fix ran without approval")
+	}
+	var fixID string
+	waitFor(t, func() bool {
+		snap, _ := store.ReadState(dataDir)
+		if snap == nil || snap.Monitors["backup"].Heal == nil || snap.Monitors["backup"].Heal.Waiting == nil {
+			return false
+		}
+		fixID = snap.Monitors["backup"].Heal.Waiting.ID
+		return true
+	})
+	ans, err := heal.Submit(context.Background(), dataDir,
+		heal.Request{Monitor: "backup", FixID: fixID, Action: heal.ActionApprove, At: time.Now()}, 10*time.Second)
+	if err != nil || !ans.OK || ans.FixID != fixID {
+		t.Fatalf("approve: %+v %v", ans, err)
+	}
+	waitFor(t, func() bool { return len(alerts()) >= 2 })
+	last := alerts()[1]
+	if last.Kind != alert.KindHealed || !strings.Contains(last.Heal, "after your approval") {
+		t.Fatalf("after approval = %+v", last)
+	}
+	if k := historyKinds(t, dataDir); k["heal"] < 2 {
+		t.Fatalf("history kinds = %v, want the approval and the fix recorded", k)
 	}
 }

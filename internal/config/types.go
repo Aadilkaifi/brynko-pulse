@@ -154,24 +154,44 @@ type Monitor struct {
 	SourceFile string `json:"-"`
 }
 
-// Heal actions.
+// Heal modes.
 const (
-	HealRestart = "restart" // restart the service or container the monitor watches
-	HealRun     = "run"     // run a program the admin chose
+	HealOff  = "off"  // the rule is kept but does nothing
+	HealAsk  = "ask"  // pulse prepares the fix and waits for a person to approve it
+	HealAuto = "auto" // pulse runs the fix by itself, a limited number of times
 )
 
-// Heal is a fix pulse tries by itself when a monitor fails, a limited number of times.
+// Heal step kinds, for the catalog.
+const (
+	StepRestartService   = "restart_service"
+	StepRestartContainer = "restart_container"
+	StepRun              = "run"
+)
+
+// Heal is what pulse does when a monitor fails: ordered steps, run by itself
+// (auto) or after a person approves them (ask).
 type Heal struct {
-	Action   string   `json:"action"`
-	Run      []string `json:"run,omitempty"`     // for HealRun: the program and its arguments, never a shell
-	Timeout  Duration `json:"timeout,omitempty"` // how long the fix may take
-	Attempts int      `json:"attempts,omitempty"`
-	Within   Duration `json:"within,omitempty"` // Attempts counts tries within this long
-	Verify   Duration `json:"verify,omitempty"` // how long to wait for the monitor to be OK again
+	Mode     string     `json:"mode,omitempty"`
+	Steps    []HealStep `json:"steps"`
+	OnlyIfOK []string   `json:"only_if_ok,omitempty"` // monitors that must be OK, else the cause is likely there
+	Timeout  Duration   `json:"timeout,omitempty"`    // how long all steps together may take
+	Attempts int        `json:"attempts,omitempty"`
+	Within   Duration   `json:"within,omitempty"` // Attempts counts automatic tries within this long
+	Verify   Duration   `json:"verify,omitempty"` // how long to wait for the monitor to be OK again
+}
+
+// HealStep is one step of a fix. Exactly one field is set.
+type HealStep struct {
+	RestartService   []string `json:"restart_service,omitempty"`
+	RestartContainer []string `json:"restart_container,omitempty"`
+	Run              []string `json:"run,omitempty"` // the program and its arguments, never a shell
 }
 
 // Effective returns the heal rule with defaults filled in.
 func (h Heal) Effective() Heal {
+	if h.Mode == "" {
+		h.Mode = HealAsk
+	}
 	if h.Attempts == 0 {
 		h.Attempts = 3
 	}
@@ -187,19 +207,29 @@ func (h Heal) Effective() Heal {
 	return h
 }
 
-// HealActions lists the fixes a monitor type supports: every type may run a
-// program; only the types that watch something restartable may restart it.
-func HealActions(monitorType string) []string {
-	if monitorType == "service" || monitorType == "container" {
-		return []string{HealRestart, HealRun}
+// HealSteps lists the step kinds a monitor type may use. A fix helps when the
+// problem comes from something pulse can restart or a program can repair; it
+// cannot renew a certificate, refresh a file or make a job check in, so those
+// types have none.
+func HealSteps(monitorType string) []string {
+	switch monitorType {
+	case "ssl", "file", "heartbeat":
+		return nil
 	}
-	return []string{HealRun}
+	return []string{StepRestartService, StepRestartContainer, StepRun}
 }
 
-// HealsService reports whether a heal rule restarts a service, which needs a
-// right the service account does not have by default.
-func (m Monitor) HealsService() bool {
-	return m.IsEnabled() && m.Heal != nil && m.Heal.Action == HealRestart && m.Type == "service"
+// HealServices lists the services this monitor's fix restarts, which needs a
+// right the service account does not have by default. Empty when it is off.
+func (m Monitor) HealServices() []string {
+	if !m.IsEnabled() || m.Heal == nil || m.Heal.Effective().Mode == HealOff {
+		return nil
+	}
+	var out []string
+	for _, s := range m.Heal.Steps {
+		out = append(out, s.RestartService...)
+	}
+	return out
 }
 
 // LogSource names where a log monitor reads from.

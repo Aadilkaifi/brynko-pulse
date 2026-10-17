@@ -38,6 +38,7 @@ import (
 
 const (
 	saveEvery    = 5 * time.Second
+	fixPoll      = 2 * time.Second // how often approvals from pulse fix are looked for
 	checkTimeout = 90 * time.Second
 	maxJitter    = 5 * time.Second
 	stopTimeout  = 15 * time.Second
@@ -108,9 +109,12 @@ func Run(ctx context.Context, o Options) error {
 	saveCtx, stopSaving := context.WithCancel(context.Background())
 	saveDone := make(chan struct{})
 	go func() { defer close(saveDone); r.saveLoop(saveCtx) }()
+	fixDone := make(chan struct{})
+	go func() { defer close(fixDone); r.serveFixes(saveCtx) }()
 	defer func() {
 		stopSaving()
 		<-saveDone
+		<-fixDone
 		r.save()
 	}()
 
@@ -168,8 +172,9 @@ type generation struct {
 	mu     sync.Mutex
 	status map[string]store.MonitorStatus
 
-	plans map[string]heal.Plan // monitors with a heal rule
-	fixer heal.Fixer
+	plans  map[string]heal.Plan // monitors with a heal rule
+	fixer  heal.Fixer
+	nudges map[string]func() // checks a monitor now, such as after an approval
 }
 
 func (r *runner) start(parent context.Context, cfg *config.Config) *generation {
@@ -179,7 +184,7 @@ func (r *runner) start(parent context.Context, cfg *config.Config) *generation {
 		client = channelClient()
 	}
 	g := &generation{cfg: cfg, cancel: cancel, status: map[string]store.MonitorStatus{},
-		disp: notify.New(cfg, client, r.o.Log), plans: map[string]heal.Plan{},
+		disp: notify.New(cfg, client, r.o.Log), plans: map[string]heal.Plan{}, nudges: map[string]func(){},
 		fixer: heal.Fixer{Platform: r.o.Platform, OutputLimit: cfg.Limits.CommandOutputBytes}}
 	r.heals.SetLimit(cfg.Limits.MaxHealsPerHour)
 	windows, err := maintenance.Compile(cfg.Maintenance)
@@ -293,6 +298,9 @@ func (r *runner) loop(ctx context.Context, g *generation, m config.Monitor, chk 
 		default: // a check is already due
 		}
 	}
+	g.mu.Lock()
+	g.nudges[m.ID] = nudge
+	g.mu.Unlock()
 	if w, ok := chk.(monitor.Watcher); ok {
 		go w.Watch(ctx, nudge)
 	}
@@ -457,17 +465,19 @@ func (r *runner) healStep(ctx context.Context, g *generation, m config.Monitor, 
 		blocked = "the maintenance window " + w.Name + " is open"
 	} else if st.Flapping {
 		blocked = "it keeps switching between failing and working"
+	} else if dep := r.failingDependency(p); dep != "" {
+		blocked = dep + " is failing too, which is the likely cause"
 	}
 	step := r.heals.Step(m.ID, p, now, st, ev, blocked)
 	if !step.Start {
 		return step
 	}
-	r.o.Log.Info("self-healing", "monitor", m.ID, "fix", p.What, "attempt", step.Attempt)
+	r.o.Log.Info("self-healing", "monitor", m.ID, "fix", p.What, "attempt", step.Attempt, "approved", step.Approved)
 	g.wg.Add(1)
 	go func() {
 		defer g.wg.Done()
-		out := g.fixer.Fix(ctx, m, p)
-		out.Attempt = step.Attempt
+		out := g.fixer.Fix(ctx, p)
+		out.Attempt, out.Approved = step.Attempt, step.Approved
 		r.heals.Done(m.ID, out, p.Verify)
 		detail := heal.Describe(p, out)
 		if out.Err != nil {
@@ -487,6 +497,72 @@ func (r *runner) healStep(ctx context.Context, g *generation, m config.Monitor, 
 		}
 	}()
 	return step
+}
+
+// failingDependency names the first monitor in the plan's only_if_ok that is failing
+// or about to, or "" when they are all fine.
+func (r *runner) failingDependency(p heal.Plan) string {
+	for _, id := range p.OnlyIfOK {
+		if st := r.eng.Get(id); st.Status == engine.Firing || st.Status == engine.Pending {
+			return id
+		}
+	}
+	return ""
+}
+
+// serveFixes answers `pulse fix approve` and `pulse fix dismiss` until ctx ends.
+func (r *runner) serveFixes(ctx context.Context) {
+	if err := heal.PrepareRequests(r.o.DataDir); err != nil {
+		r.o.Log.Warn("fixes cannot be approved from the command line", "error", err.Error())
+	}
+	t := time.NewTicker(fixPoll)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-t.C:
+			if err := heal.Serve(r.o.DataDir, now, r.answerFix); err != nil {
+				r.o.Log.Warn("cannot read fix approvals", "error", err.Error())
+			}
+		}
+	}
+}
+
+// answerFix approves or dismisses a waiting fix, records it and checks the monitor at once.
+func (r *runner) answerFix(req heal.Request) heal.Answer {
+	g := r.current.Load()
+	if g == nil {
+		return heal.Answer{Error: "pulse is starting; try again in a moment"}
+	}
+	p, ok := g.plans[req.Monitor]
+	if !ok {
+		return heal.Answer{Error: fmt.Sprintf("monitor %s has no fix in use", req.Monitor)}
+	}
+	decide, verb := r.heals.Approve, "Approved"
+	if req.Action == heal.ActionDismiss {
+		decide, verb = r.heals.Dismiss, "Dismissed"
+	}
+	w, err := decide(req.Monitor, req.FixID)
+	if err != nil {
+		return heal.Answer{Error: err.Error()}
+	}
+	r.o.Log.Info("self-healing fix "+strings.ToLower(verb), "monitor", req.Monitor, "fix", p.What)
+	name, severity := req.Monitor, ""
+	g.mu.Lock()
+	if ms, ok := g.status[req.Monitor]; ok {
+		name, severity = ms.Name, ms.Severity
+	}
+	nudge := g.nudges[req.Monitor]
+	g.mu.Unlock()
+	if err := r.st.Append(store.Record{At: time.Now(), Kind: "heal", Monitor: req.Monitor, Name: name,
+		Severity: severity, Detail: fmt.Sprintf("%s: %s", verb, p.What), Channels: []string{}}); err != nil {
+		r.o.Log.Error("cannot write alert history", "error", err.Error())
+	}
+	if nudge != nil && req.Action == heal.ActionApprove {
+		nudge()
+	}
+	return heal.Answer{OK: true, FixID: w.ID, What: p.What}
 }
 
 // silenced reports the silence or maintenance window covering id, whichever
