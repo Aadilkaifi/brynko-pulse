@@ -1,7 +1,7 @@
 # brynko-pulse
 
 Open-source monitoring and alerts for Linux and Windows servers, developed by
-[Brynko Technologies](https://brynko.in). One small program watches the server and tells you within
+[brynko technologies](https://brynko.in). One small program watches the server and tells you within
 seconds when something breaks, through the channels you choose: email,
 WhatsApp (your own Meta account), Telegram, Slack or any webhook.
 
