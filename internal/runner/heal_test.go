@@ -86,12 +86,14 @@ func TestRunHealsAndSendsOneMessage(t *testing.T) {
 		t.Fatalf("the fix did not run: %v", err)
 	}
 	recs, _ := store.History(dataDir, 10)
-	kinds := []string{}
+	kinds := map[string]int{}
 	for _, r := range recs {
-		kinds = append(kinds, r.Kind)
+		kinds[r.Kind]++
 	}
-	if strings.Join(kinds, ",") != "healed,heal" {
-		t.Fatalf("history kinds = %v, want the fix and then the healed message", kinds)
+	// The monitor may see the file back before the fix has written its own record, so
+	// only the records are checked, not their order.
+	if len(recs) != 2 || kinds["heal"] != 1 || kinds[alert.KindHealed] != 1 {
+		t.Fatalf("history = %+v, want one fix and one healed message", recs)
 	}
 	snap, _ := store.ReadState(dataDir)
 	hs := snap.Monitors["backup"].Heal
