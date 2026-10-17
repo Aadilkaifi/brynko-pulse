@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- Go 1.24 or newer. Check with `go version`.
+- Go 1.26 or newer. Check with `go version`.
 - Git.
 
 No C compiler is needed: pulse builds with `CGO_ENABLED=0` for every platform.

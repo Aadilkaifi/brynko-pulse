@@ -26,7 +26,9 @@ completion).
    reload and the old one keeps running.
 
 For safety the files must not be changeable by ordinary users, and `secrets.env` must not be
-readable by them; pulse refuses to start otherwise and tells you the command that fixes it.
+readable by them; pulse refuses to start otherwise and tells you the command that fixes it. A folder
+you set up yourself with `--config`, without root or Administrator rights, may also belong to you:
+pulse accepts it and keeps everyone else out.
 
 ## Changing it from scripts and tools
 

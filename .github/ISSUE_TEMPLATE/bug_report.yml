@@ -12,7 +12,7 @@ body:
     attributes:
       label: pulse version
       description: The output of `pulse version`.
-      placeholder: pulse 0.1.0 (go1.24, linux/amd64)
+      placeholder: pulse v0.1.1 (go1.27.2, linux/amd64)
     validations:
       required: true
   - type: dropdown
