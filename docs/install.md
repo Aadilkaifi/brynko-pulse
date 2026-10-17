@@ -109,7 +109,7 @@ yum) or else the plain program, and runs `pulse install`.
 To install a specific release instead of the latest, set `PULSE_VERSION`:
 
 ```sh
-curl -fsSL https://github.com/Aadilkaifi/brynko-pulse/releases/latest/download/install.sh | sudo PULSE_VERSION=v0.1.1 sh
+curl -fsSL https://github.com/Aadilkaifi/brynko-pulse/releases/latest/download/install.sh | sudo PULSE_VERSION=v0.1.2 sh
 ```
 
 ### Linux package
@@ -118,8 +118,8 @@ Download the package for your CPU from the releases page (`amd64` for most serve
 such as AWS Graviton; `uname -m` tells you) and install it:
 
 ```sh
-sudo apt install ./brynko-pulse_v0.1.1_linux_amd64.deb    # Debian, Ubuntu
-sudo dnf install ./brynko-pulse_v0.1.1_linux_amd64.rpm     # Fedora, RHEL, Rocky, Alma
+sudo apt install ./brynko-pulse_v0.1.2_linux_amd64.deb    # Debian, Ubuntu
+sudo dnf install ./brynko-pulse_v0.1.2_linux_amd64.rpm     # Fedora, RHEL, Rocky, Alma
 ```
 
 The package puts `pulse` in `/usr/bin` and runs `pulse install` for you.
@@ -127,11 +127,11 @@ The package puts `pulse` in `/usr/bin` and runs `pulse install` for you.
 ### Linux program only
 
 ```sh
-curl -fsSLO https://github.com/Aadilkaifi/brynko-pulse/releases/download/v0.1.1/pulse_v0.1.1_linux_amd64
-curl -fsSLO https://github.com/Aadilkaifi/brynko-pulse/releases/download/v0.1.1/SHA256SUMS
+curl -fsSLO https://github.com/Aadilkaifi/brynko-pulse/releases/download/v0.1.2/pulse_v0.1.2_linux_amd64
+curl -fsSLO https://github.com/Aadilkaifi/brynko-pulse/releases/download/v0.1.2/SHA256SUMS
 sha256sum --check --ignore-missing SHA256SUMS
-chmod +x pulse_v0.1.1_linux_amd64
-sudo ./pulse_v0.1.1_linux_amd64 install
+chmod +x pulse_v0.1.2_linux_amd64
+sudo ./pulse_v0.1.2_linux_amd64 install
 ```
 
 `pulse install` copies itself to `/usr/local/bin/pulse`, so you can delete the downloaded file
@@ -139,19 +139,31 @@ afterwards.
 
 ### Windows by hand
 
-1. Download `pulse_v0.1.1_windows_amd64.exe` and `SHA256SUMS` from the releases page.
+1. Download `pulse_v0.1.2_windows_amd64.exe` and `SHA256SUMS` from the releases page.
 2. In PowerShell, check the file; the two values must match:
    ```powershell
-   (Get-FileHash .\pulse_v0.1.1_windows_amd64.exe -Algorithm SHA256).Hash
+   (Get-FileHash .\pulse_v0.1.2_windows_amd64.exe -Algorithm SHA256).Hash
    Select-String windows_amd64.exe .\SHA256SUMS
    ```
 3. In PowerShell with **Run as administrator**:
    ```powershell
-   .\pulse_v0.1.1_windows_amd64.exe install
+   .\pulse_v0.1.2_windows_amd64.exe install
    ```
 
 The program is not code-signed yet, so Windows SmartScreen may warn about a file downloaded with a
-browser; the checksum is how you know the file is genuine.
+browser; the checksum, and the check below, are how you know the file is genuine.
+
+### Check where a download came from
+
+The checksum shows a file arrived undamaged. To check it was built by this project's own release
+workflow, from this repository, use the [GitHub CLI](https://cli.github.com) (from v0.1.2 on):
+
+```sh
+gh attestation verify pulse_v0.1.2_linux_amd64 --repo Aadilkaifi/brynko-pulse
+```
+
+It works the same for every file in a release, including `SHA256SUMS` and the Windows `.exe`. A
+file that was changed after the build, or built anywhere else, fails the check.
 
 ### Install options
 
@@ -159,7 +171,7 @@ browser; the checksum is how you know the file is genuine.
 
 - `--no-discover`: do not add monitors for the services, containers and ports found on the server
   (they are added switched off anyway). Works on a first install with the program-only and Windows
-  methods, for example `sudo ./pulse_v0.1.1_linux_amd64 install --no-discover`.
+  methods, for example `sudo ./pulse_v0.1.2_linux_amd64 install --no-discover`.
 - `--no-docker`: do not give the service access to Docker (see below). After any install, run
   `sudo pulse install --no-docker` to take that access away again.
 
