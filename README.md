@@ -72,6 +72,7 @@ The same app also works with your containers, databases, files and deploy script
 | [Monitors](docs/monitors.md) | Disk, memory, CPU, services, containers, ports, websites, certificates, logs, files, commands, heartbeats |
 | [Channels](docs/channels.md) | Email, WhatsApp, Telegram, Slack, webhook |
 | [Self-healing](docs/self-healing.md) | Restart a failed service or container, or run your own fix |
+| [Dead-server alert](docs/dead-server-alert.md) | Get an email when a whole server goes silent |
 | [Operations](docs/operations.md) | Status, history, logs, troubleshooting |
 | [Command reference](docs/cli.md) | Every command and flag |
 | [Configuration reference](docs/config-reference.md) | Every config field |

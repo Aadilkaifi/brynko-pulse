@@ -289,3 +289,56 @@ func TestRestartKeepsChannelHealth(t *testing.T) {
 		}
 	}
 }
+
+// The watchdog checks in soon after start with the key from secrets.env, the server's
+// name and the email addresses of its channels, and status shows how it went.
+func TestWatchdogChecksInAndStatusShowsIt(t *testing.T) {
+	var mu sync.Mutex
+	var got []map[string]any
+	var auth string
+	relay := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var c map[string]any
+		json.NewDecoder(r.Body).Decode(&c)
+		mu.Lock()
+		got, auth = append(got, c), r.Header.Get("Authorization")
+		mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer relay.Close()
+
+	cfgDir, dataDir := t.TempDir(), t.TempDir()
+	writeFiles(t, cfgDir, map[string]string{
+		"pulse.yaml": "version: 1\nserver_name: test-box\nserver_address: 203.0.113.10\ndefaults:\n  notify: [mail]\n  interval: 1h\n" +
+			"watchdog:\n  key: ${PULSE_BRYNKO_KEY}\n  url: " + relay.URL + "\n",
+		"channels.yaml": "channels:\n  mail:\n    type: smtp\n    host: smtp.example.com\n    from: a@example.com\n" +
+			"    to: [ops@example.com, oncall@example.com]\n",
+		"secrets.env":     "PULSE_BRYNKO_KEY=k3y\n",
+		"monitors/m.yaml": "monitors:\n  - id: mem\n    type: memory\n    alert_when: used_percent > 99\n",
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, Options{ConfigDir: cfgDir, DataDir: dataDir, Platform: platform.Current(), HTTPClient: relay.Client(),
+			Log: slog.New(slog.NewTextHandler(io.Discard, nil)), SkipSecurityCheck: true, Version: "test"})
+	}()
+	waitFor(t, func() bool { mu.Lock(); defer mu.Unlock(); return len(got) >= 1 })
+	waitFor(t, func() bool {
+		snap, _ := store.ReadState(dataDir)
+		return snap != nil && snap.Watchdog != nil && !snap.Watchdog.LastOK.IsZero()
+	})
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	c := got[0]
+	if auth != "Bearer k3y" || c["server"] != "test-box" || c["address"] != "203.0.113.10" || c["version"] != "test" ||
+		len(c["email"].([]any)) != 2 || c["every"] != float64(60) {
+		t.Fatalf("check-in = %v, auth %q", c, auth)
+	}
+	snap, _ := store.ReadState(dataDir)
+	if w := snap.Watchdog; w.LastError != "" || len(w.Email) != 2 {
+		t.Fatalf("watchdog status = %+v", w)
+	}
+}

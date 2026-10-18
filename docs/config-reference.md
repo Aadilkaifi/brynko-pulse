@@ -19,6 +19,7 @@ caught by `pulse validate` instead of being ignored.
 | `limits` | [limits](#limits) |  |  |  |
 | `maintenance` | list of [maintenance](#maintenance) windows |  |  |  |
 | `server_address` | string |  |  | How people reach this server, shown in alerts beside server_name, for example 203.0.113.10 or web-1.example.com. |
+| `watchdog` | [watchdog](#watchdog) |  |  |  |
 
 ### defaults
 

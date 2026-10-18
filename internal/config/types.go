@@ -22,6 +22,7 @@ type Config struct {
 	Channels      map[string]Channel `json:"channels"`
 	Monitors      []Monitor          `json:"monitors"`
 	Maintenance   []Maintenance      `json:"maintenance"`
+	Watchdog      *Watchdog          `json:"watchdog,omitempty"`
 	// Secrets is never printed or saved.
 	Secrets Secrets `json:"-"`
 }
@@ -64,6 +65,53 @@ type Maintenance struct {
 	To       string   `json:"to,omitempty"`
 	Timezone string   `json:"timezone,omitempty"`
 	Monitors []string `json:"monitors,omitempty"`
+}
+
+// DefaultWatchdogURL is the brynko relay's check-in address.
+const DefaultWatchdogURL = "https://cloudagent.brynko.in/api/v1/pulse/checkin"
+
+// Watchdog has pulse check in with the brynko relay every minute, so the relay
+// can alert when the server goes silent. Off unless set.
+type Watchdog struct {
+	Key    string   `json:"key"`              // ${NAME} reference to the relay key
+	Notify []string `json:"notify,omitempty"` // email channels to alert; empty: defaults.notify
+	URL    string   `json:"url,omitempty"`
+}
+
+// Endpoint is where pulse checks in.
+func (w Watchdog) Endpoint() string {
+	if w.URL != "" {
+		return w.URL
+	}
+	return DefaultWatchdogURL
+}
+
+// WatchdogEmails returns the addresses the relay alerts, from the email channels
+// the watchdog names (or the default channels), and the channels it skips
+// because they are not email.
+func (c *Config) WatchdogEmails() (emails, skipped []string) {
+	if c.Watchdog == nil {
+		return nil, nil
+	}
+	ids := c.Watchdog.Notify
+	if len(ids) == 0 {
+		ids = c.Defaults.Notify
+	}
+	seen := map[string]bool{}
+	for _, id := range ids {
+		ch, ok := c.Channels[id]
+		if !ok || ch.Type != "smtp" {
+			skipped = append(skipped, id)
+			continue
+		}
+		for _, to := range ch.To {
+			if !seen[to] {
+				seen[to] = true
+				emails = append(emails, to)
+			}
+		}
+	}
+	return emails, skipped
 }
 
 // Limits bound how much pulse sends and keeps.

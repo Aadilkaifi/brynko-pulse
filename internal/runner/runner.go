@@ -34,14 +34,18 @@ import (
 	"github.com/Aadilkaifi/brynko-pulse/internal/rule"
 	"github.com/Aadilkaifi/brynko-pulse/internal/silence"
 	"github.com/Aadilkaifi/brynko-pulse/internal/store"
+	"github.com/Aadilkaifi/brynko-pulse/internal/watchdog"
 )
 
 const (
-	saveEvery    = 5 * time.Second
-	fixPoll      = 2 * time.Second // how often approvals from pulse fix are looked for
-	checkTimeout = 90 * time.Second
-	maxJitter    = 5 * time.Second
-	stopTimeout  = 15 * time.Second
+	saveEvery = 5 * time.Second
+	fixPoll   = 2 * time.Second // how often approvals from pulse fix are looked for
+	// watchdogFirst is the first check-in after start: soon, so the relay knows at once
+	// that the server is back after a reboot.
+	watchdogFirst = 3 * time.Second
+	checkTimeout  = 90 * time.Second
+	maxJitter     = 5 * time.Second
+	stopTimeout   = 15 * time.Second
 )
 
 // Options configure Run.
@@ -111,10 +115,13 @@ func Run(ctx context.Context, o Options) error {
 	go func() { defer close(saveDone); r.saveLoop(saveCtx) }()
 	fixDone := make(chan struct{})
 	go func() { defer close(fixDone); r.serveFixes(saveCtx) }()
+	watchDone := make(chan struct{})
+	go func() { defer close(watchDone); r.runWatchdog(saveCtx) }()
 	defer func() {
 		stopSaving()
 		<-saveDone
 		<-fixDone
+		<-watchDone
 		r.save()
 	}()
 
@@ -158,6 +165,9 @@ type runner struct {
 	heals *heal.Tracker // self-healing: what it has done, across reloads
 
 	savedChannels map[string]store.ChannelStatus // delivery health from before the last stop; used once
+
+	watchMu  sync.Mutex
+	watchdog *store.WatchdogStatus // nil while the watchdog is off
 }
 
 // generation is everything built from one version of the configuration.
@@ -499,6 +509,70 @@ func (r *runner) healStep(ctx context.Context, g *generation, m config.Monitor, 
 	return step
 }
 
+// runWatchdog checks in with the brynko relay soon after start and then every
+// minute, with the configuration in force at that moment, until ctx ends.
+func (r *runner) runWatchdog(ctx context.Context) {
+	client := r.o.HTTPClient
+	if client == nil {
+		client = channelClient()
+	}
+	wait := watchdogFirst
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+		wait = watchdog.Every
+		g := r.current.Load()
+		if g == nil || g.cfg.Watchdog == nil {
+			r.setWatchdog(nil)
+			continue
+		}
+		cfg := g.cfg
+		emails, skipped := cfg.WatchdogEmails()
+		c := watchdog.Checkin{Server: cfg.ServerName, Address: cfg.ServerAddress, Version: r.o.Version,
+			Email: emails, Every: int(watchdog.Every / time.Second)}
+		if c.Email == nil {
+			c.Email = []string{}
+		}
+		sctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		err := watchdog.Send(sctx, client, cfg.Watchdog.Endpoint(), cfg.Secrets.Resolve(cfg.Watchdog.Key), c)
+		cancel()
+		r.watchMu.Lock()
+		st := store.WatchdogStatus{Email: emails, Skipped: skipped}
+		if r.watchdog != nil {
+			st.LastOK, st.LastError, st.LastErrorAt = r.watchdog.LastOK, r.watchdog.LastError, r.watchdog.LastErrorAt
+		}
+		if err != nil {
+			st.LastError, st.LastErrorAt = err.Error(), time.Now()
+		} else {
+			st.LastOK, st.LastError = time.Now(), ""
+		}
+		r.watchdog = &st
+		r.watchMu.Unlock()
+		if err != nil && ctx.Err() == nil {
+			r.o.Log.Warn("watchdog check-in failed", "error", err.Error())
+		}
+	}
+}
+
+func (r *runner) setWatchdog(st *store.WatchdogStatus) {
+	r.watchMu.Lock()
+	r.watchdog = st
+	r.watchMu.Unlock()
+}
+
+func (r *runner) watchdogStatus() *store.WatchdogStatus {
+	r.watchMu.Lock()
+	defer r.watchMu.Unlock()
+	if r.watchdog == nil {
+		return nil
+	}
+	st := *r.watchdog
+	return &st
+}
+
 // failingDependency names the first monitor in the plan's only_if_ok that is failing
 // or about to, or "" when they are all fine.
 func (r *runner) failingDependency(p heal.Plan) string {
@@ -622,7 +696,7 @@ func (r *runner) save() {
 	}
 	snap := store.Snapshot{Server: g.cfg.ServerName, PID: os.Getpid(), Version: r.o.Version,
 		Started: r.started, Updated: time.Now(), Monitors: map[string]store.MonitorStatus{},
-		Channels: g.disp.Status()}
+		Channels: g.disp.Status(), Watchdog: r.watchdogStatus()}
 	states := r.eng.Snapshot()
 	now := time.Now()
 	silences, _ := r.silences.Current(now)

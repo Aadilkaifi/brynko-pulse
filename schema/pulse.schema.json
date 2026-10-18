@@ -12,6 +12,7 @@
     "limits": { "$ref": "#/$defs/limits" },
     "api": { "$ref": "#/$defs/api" },
     "maintenance": { "$ref": "#/$defs/maintenanceList" },
+    "watchdog": { "$ref": "#/$defs/watchdog" },
     "channels": { "$ref": "#/$defs/channelMap" },
     "monitors": { "$ref": "#/$defs/monitorList" }
   },
@@ -29,7 +30,8 @@
         "defaults": { "$ref": "#/$defs/defaults" },
         "limits": { "$ref": "#/$defs/limits" },
         "api": { "$ref": "#/$defs/api" },
-        "maintenance": { "$ref": "#/$defs/maintenanceList" }
+        "maintenance": { "$ref": "#/$defs/maintenanceList" },
+        "watchdog": { "$ref": "#/$defs/watchdog" }
       },
       "required": ["version", "server_name"],
       "additionalProperties": false
@@ -167,6 +169,18 @@
       "description": "Local API for tools and a future UI. Never listens on a network port.",
       "type": "object",
       "properties": { "enabled": { "type": "boolean", "default": false } },
+      "additionalProperties": false
+    },
+
+    "watchdog": {
+      "description": "Dead-server alert through the brynko relay: pulse checks in every minute, and the relay emails you when this server stops checking in (it is down, cut off, or pulse stopped). Off unless set. pulse sends the server's name and address, its version, and the email addresses below; nothing about your monitors.",
+      "type": "object",
+      "properties": {
+        "key": { "$ref": "#/$defs/envRef", "description": "This server's relay key, as a ${NAME} reference to secrets.env." },
+        "notify": { "$ref": "#/$defs/notifyList", "description": "Email channels whose addresses the relay alerts. Other channel types are skipped: their addresses hold secrets that never leave the server. Empty: the server's default channels (defaults.notify)." },
+        "url": { "type": "string", "pattern": "^https://", "maxLength": 300, "default": "https://cloudagent.brynko.in/api/v1/pulse/checkin", "description": "Where to check in: an https:// address. Leave it unset for the brynko relay." }
+      },
+      "required": ["key"],
       "additionalProperties": false
     },
 

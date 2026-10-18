@@ -90,6 +90,16 @@ type Snapshot struct {
 	Updated  time.Time                `json:"updated"`
 	Monitors map[string]MonitorStatus `json:"monitors"`
 	Channels map[string]ChannelStatus `json:"channels"`
+	Watchdog *WatchdogStatus          `json:"watchdog,omitempty"` // set when the watchdog is on
+}
+
+// WatchdogStatus is how the last check-ins with the brynko relay went.
+type WatchdogStatus struct {
+	LastOK      time.Time `json:"last_ok,omitzero"`
+	LastError   string    `json:"last_error,omitempty"`
+	LastErrorAt time.Time `json:"last_error_at,omitzero"`
+	Email       []string  `json:"email,omitempty"`   // who the relay alerts
+	Skipped     []string  `json:"skipped,omitempty"` // channels it cannot use (not email)
 }
 
 // KindUndelivered is the history kind of an alert a channel could not deliver.

@@ -16,11 +16,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Aadilkaifi/brynko-pulse/internal/channel"
 	"github.com/Aadilkaifi/brynko-pulse/internal/config"
 	"github.com/Aadilkaifi/brynko-pulse/internal/platform"
 	"github.com/Aadilkaifi/brynko-pulse/internal/platform/host"
 	"github.com/Aadilkaifi/brynko-pulse/internal/runner"
 	"github.com/Aadilkaifi/brynko-pulse/internal/setup"
+	"github.com/Aadilkaifi/brynko-pulse/internal/version"
+	"github.com/Aadilkaifi/brynko-pulse/internal/watchdog"
 )
 
 // Replaced in tests, so they never touch the real service manager.
@@ -227,6 +230,10 @@ func uninstall(p platform.Platform, cfgDir, dataDir string, purge, yes, asJSON b
 
 	ctx, cancel := signalContext(installTimeout)
 	defer cancel()
+	// A server whose pulse is removed on purpose is not a dead server: tell the relay first.
+	if step := watchdogGoodbye(ctx, cfgDir); step != "" {
+		steps = append(steps, step)
+	}
 	// The right to restart services goes with the service.
 	if hr, err := p.SetHealRights(ctx, nil); err == nil {
 		steps = append(steps, hr.Steps...)
@@ -238,6 +245,26 @@ func uninstall(p platform.Platform, cfgDir, dataDir string, purge, yes, asJSON b
 	}
 	purged, err := setup.Purge(cfgDir, dataDir)
 	return append(steps, purged...), err
+}
+
+// watchdogClient makes the HTTP client for the goodbye; tests replace it.
+var watchdogClient = channel.NewHTTPClient
+
+// watchdogGoodbye tells the brynko relay to stop watching this server, when the
+// watchdog is on. Best effort: the step says how it went; it never stops an uninstall.
+func watchdogGoodbye(ctx context.Context, cfgDir string) string {
+	cfg, _ := config.Load(cfgDir)
+	if cfg == nil || cfg.Watchdog == nil {
+		return ""
+	}
+	sctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	err := watchdog.Send(sctx, watchdogClient(), cfg.Watchdog.Endpoint(), cfg.Secrets.Resolve(cfg.Watchdog.Key),
+		watchdog.Checkin{Server: cfg.ServerName, Address: cfg.ServerAddress, Version: version.Version, Email: []string{}, Goodbye: true})
+	if err != nil {
+		return "Could not tell the brynko relay that pulse is removed (" + err.Error() + "); turn the dead-server alert off in the app"
+	}
+	return "Told the brynko relay to stop watching this server"
 }
 
 func absDirs(cfgDir, dataDir string) (string, string, error) {

@@ -98,9 +98,17 @@ func TestStormGuardHoldsAndSummarises(t *testing.T) {
 	if s.count() != 4 {
 		t.Fatalf("sent %d, want 3 alerts plus 1 summary", s.count())
 	}
-	last := s.got[len(s.got)-1]
-	if last.Kind != alert.KindSummary || !strings.Contains(last.Detail, "7 more alerts") {
-		t.Fatalf("summary = %+v", last)
+	// Workers deliver in parallel, so the summary is not always the last one sent.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var summaries []alert.Alert
+	for _, a := range s.got {
+		if a.Kind == alert.KindSummary {
+			summaries = append(summaries, a)
+		}
+	}
+	if len(summaries) != 1 || !strings.Contains(summaries[0].Detail, "7 more alerts") {
+		t.Fatalf("summaries = %+v", summaries)
 	}
 }
 

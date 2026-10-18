@@ -313,24 +313,64 @@ const reservedID = "all"
 
 var envRef = regexp.MustCompile(`^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$`)
 
+// checkWatchdog checks that the watchdog's channels exist and that the relay has
+// someone to email: it can only email, since other channels' addresses hold secrets.
+func checkWatchdog(d document, w map[string]any, defaultNotify []any, channels map[string]bool, emailTo map[string]int, r *Result) {
+	ids, own := w["notify"].([]any)
+	if !own {
+		ids = defaultNotify
+	}
+	addresses := 0
+	var skipped []string
+	for i, v := range ids {
+		id := v.(string)
+		switch {
+		case !channels[id] && own:
+			r.Errors = append(r.Errors, issueAt(d, []string{"watchdog", "notify", fmt.Sprint(i)},
+				fmt.Sprintf("channel %q is not defined in %s", id, ChannelsFile)))
+		case !channels[id]:
+			// reported under defaults.notify
+		case emailTo[id] == 0:
+			skipped = append(skipped, id)
+		default:
+			addresses += emailTo[id]
+		}
+	}
+	if len(skipped) > 0 {
+		r.Warnings = append(r.Warnings, issueAt(d, []string{"watchdog"}, fmt.Sprintf(
+			"the watchdog emails only: %s will not be told when this server goes silent", strings.Join(skipped, ", "))))
+	}
+	if addresses == 0 {
+		r.Warnings = append(r.Warnings, issueAt(d, []string{"watchdog"},
+			"the watchdog has no email address to alert: name an email channel in watchdog.notify or defaults.notify"))
+	}
+}
+
 // crossCheck finds problems that span files. It runs only when every file
 // matches the schema, so type assertions below are safe.
 func crossCheck(docs []document, secrets Secrets, r *Result) {
 	channels := map[string]bool{}
+	emailTo := map[string]int{} // email channel -> how many addresses
 	var defaultNotify []any
+	var watchdog map[string]any
 	var pulseDoc document
 	for _, d := range docs {
 		m := d.value.(map[string]any)
 		switch d.kind {
 		case kindChannels:
-			for id := range m["channels"].(map[string]any) {
+			for id, ch := range m["channels"].(map[string]any) {
 				channels[id] = true
+				if c, _ := ch.(map[string]any); c["type"] == "smtp" {
+					to, _ := c["to"].([]any)
+					emailTo[id] = len(to)
+				}
 			}
 		case kindPulse:
 			pulseDoc = d
 			if def, ok := m["defaults"].(map[string]any); ok {
 				defaultNotify, _ = def["notify"].([]any)
 			}
+			watchdog, _ = m["watchdog"].(map[string]any)
 		}
 	}
 
@@ -339,6 +379,10 @@ func crossCheck(docs []document, secrets Secrets, r *Result) {
 			r.Errors = append(r.Errors, issueAt(pulseDoc, []string{"defaults", "notify", fmt.Sprint(i)},
 				fmt.Sprintf("channel %q is not defined in %s", id, ChannelsFile)))
 		}
+	}
+
+	if watchdog != nil {
+		checkWatchdog(pulseDoc, watchdog, defaultNotify, channels, emailTo, r)
 	}
 
 	monitorIDs := map[string]string{}
