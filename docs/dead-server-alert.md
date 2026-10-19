@@ -35,10 +35,10 @@ watchdog:
 | Setting | Notes |
 |---|---|
 | `key` | This server's relay key, as a `${NAME}` reference to `secrets.env` |
-| `notify` | Email channels whose `to` addresses the relay alerts. Other channels are skipped: Telegram, Slack, WhatsApp and webhook addresses hold secrets that never leave the server. Empty: the server's default channels |
+| `notify` | Email channels whose `to` addresses the relay alerts. Other channels are skipped: Telegram, Slack, WhatsApp and webhook addresses hold secrets that never leave the server. Empty: the server's default channels. With no email address at all, the relay emails the brynko account that turned the alert on |
 | `url` | Where to check in. Leave it unset |
 
-`pulse validate` warns when a named channel is not email, and when nobody would be emailed.
+`pulse validate` warns when a named channel is not email, and when no email address is named.
 
 ## What the relay receives
 

@@ -342,7 +342,7 @@ func checkWatchdog(d document, w map[string]any, defaultNotify []any, channels m
 	}
 	if addresses == 0 {
 		r.Warnings = append(r.Warnings, issueAt(d, []string{"watchdog"},
-			"the watchdog has no email address to alert: name an email channel in watchdog.notify or defaults.notify"))
+			"the watchdog names no email address, so the brynko relay emails the account that turned the alert on; name an email channel in watchdog.notify or defaults.notify to choose who it alerts"))
 	}
 }
 

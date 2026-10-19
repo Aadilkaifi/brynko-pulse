@@ -114,7 +114,7 @@ func TestValidate(t *testing.T) {
 			ChannelsFile: validChannels + "  tg:\n    type: telegram\n    bot_token: ${PULSE_TEST_PASSWORD}\n    chat_id: \"1\"\n"}),
 			wantWarn: "the watchdog emails only: tg will not be told"},
 		{name: "watchdog with nobody to email", files: base(map[string]string{PulseFile: "version: 1\nserver_name: web-1\nwatchdog:\n  key: ${K}\n"}),
-			wantWarn: "the watchdog has no email address to alert"},
+			wantWarn: "the watchdog names no email address, so the brynko relay emails the account"},
 		{name: "watchdog url is https", files: base(map[string]string{PulseFile: validPulse + "watchdog:\n  key: ${K}\n  url: http://relay.example.com\n"}), wantErr: "an https:// address"},
 		{name: "heal attempts are bounded", files: base(map[string]string{"monitors/x.yaml": "monitors:\n  - id: web\n    type: service\n    service: nginx\n    heal:\n      steps:\n        - restart_service: [nginx]\n      attempts: 50\n"}), wantErr: "maximum"},
 		{name: "heal unknown field", files: base(map[string]string{"monitors/x.yaml": "monitors:\n  - id: web\n    type: service\n    service: nginx\n    heal:\n      action: restart\n      steps:\n        - restart_service: [nginx]\n"}), wantErr: "unknown field: action"},
