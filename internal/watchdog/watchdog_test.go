@@ -34,8 +34,8 @@ func TestSendChecksInWithTheKeyAndOnlyWhatIsNeeded(t *testing.T) {
 	for k := range got {
 		keys = append(keys, k)
 	}
-	if len(got) != 5 || got["server"] != "web-1" || got["every"] != float64(60) || got["goodbye"] != nil {
-		t.Fatalf("body = %v (keys %v): only the server, its address, the version, the emails and the interval", got, keys)
+	if len(got) != 6 || got["server"] != "web-1" || got["every"] != float64(60) || got["goodbye"] != nil {
+		t.Fatalf("body = %v (keys %v): only the server, its address, the version, who to tell and the interval", got, keys)
 	}
 }
 

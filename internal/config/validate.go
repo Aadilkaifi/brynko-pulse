@@ -338,11 +338,11 @@ func checkWatchdog(d document, w map[string]any, defaultNotify []any, channels m
 	}
 	if len(skipped) > 0 {
 		r.Warnings = append(r.Warnings, issueAt(d, []string{"watchdog"}, fmt.Sprintf(
-			"the watchdog emails only: %s will not be told when this server goes silent", strings.Join(skipped, ", "))))
+			"the watchdog alerts email and brynko relay channels only: %s will not be told when this server goes silent", strings.Join(skipped, ", "))))
 	}
 	if addresses == 0 {
 		r.Warnings = append(r.Warnings, issueAt(d, []string{"watchdog"},
-			"the watchdog names no email address, so the brynko relay emails the account that turned the alert on; name an email channel in watchdog.notify or defaults.notify to choose who it alerts"))
+			"the watchdog names no address, so the brynko relay emails the account that turned the alert on; name an email or brynko relay channel in watchdog.notify or defaults.notify to choose who it alerts"))
 	}
 }
 
@@ -350,7 +350,7 @@ func checkWatchdog(d document, w map[string]any, defaultNotify []any, channels m
 // matches the schema, so type assertions below are safe.
 func crossCheck(docs []document, secrets Secrets, r *Result) {
 	channels := map[string]bool{}
-	emailTo := map[string]int{} // email channel -> how many addresses
+	emailTo := map[string]int{} // email or brynko relay channel -> how many addresses and numbers
 	var defaultNotify []any
 	var watchdog map[string]any
 	var pulseDoc document
@@ -360,9 +360,14 @@ func crossCheck(docs []document, secrets Secrets, r *Result) {
 		case kindChannels:
 			for id, ch := range m["channels"].(map[string]any) {
 				channels[id] = true
-				if c, _ := ch.(map[string]any); c["type"] == "smtp" {
+				switch c, _ := ch.(map[string]any); c["type"] {
+				case "smtp":
 					to, _ := c["to"].([]any)
 					emailTo[id] = len(to)
+				case "brynko":
+					email, _ := c["email"].([]any)
+					phones, _ := c["whatsapp"].([]any)
+					emailTo[id] = len(email) + len(phones)
 				}
 			}
 		case kindPulse:

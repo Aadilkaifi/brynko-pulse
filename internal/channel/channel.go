@@ -24,8 +24,6 @@ import (
 	"github.com/Aadilkaifi/brynko-pulse/internal/config"
 )
 
-// ErrNotAvailable means the channel type is not available in this version.
-var ErrNotAvailable = errors.New("not available in this version yet")
 
 // Sender delivers one alert.
 type Sender interface {
@@ -50,7 +48,8 @@ func New(c config.Channel, secrets config.Secrets, client *http.Client) (Sender,
 		return &whatsapp{client: client, api: "https://graph.facebook.com/v20.0", phoneID: c.PhoneNumberID,
 			token: secret(c.AccessToken), template: c.Template, language: or(c.Language, "en"), to: c.To}, nil
 	case "brynko":
-		return nil, fmt.Errorf("%s channels: %w", c.Type, ErrNotAvailable)
+		return &brynko{client: client, url: or(c.URL, DefaultRelayURL), key: secret(c.APIKey),
+			email: c.Email, whatsapp: c.WhatsApp}, nil
 	default:
 		return nil, fmt.Errorf("unknown channel type %q", c.Type)
 	}

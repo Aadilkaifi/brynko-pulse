@@ -86,32 +86,40 @@ func (w Watchdog) Endpoint() string {
 	return DefaultWatchdogURL
 }
 
-// WatchdogEmails returns the addresses the relay alerts, from the email channels
-// the watchdog names (or the default channels), and the channels it skips
-// because they are not email.
-func (c *Config) WatchdogEmails() (emails, skipped []string) {
+// WatchdogRecipients returns who the relay alerts, from the channels the
+// watchdog names (or the default channels): the addresses of email channels,
+// and the email addresses and WhatsApp numbers of brynko relay channels. Other
+// channels are skipped, because their addresses hold secrets.
+func (c *Config) WatchdogRecipients() (emails, whatsapp, skipped []string) {
 	if c.Watchdog == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	ids := c.Watchdog.Notify
 	if len(ids) == 0 {
 		ids = c.Defaults.Notify
 	}
 	seen := map[string]bool{}
-	for _, id := range ids {
-		ch, ok := c.Channels[id]
-		if !ok || ch.Type != "smtp" {
-			skipped = append(skipped, id)
-			continue
-		}
-		for _, to := range ch.To {
-			if !seen[to] {
-				seen[to] = true
-				emails = append(emails, to)
+	add := func(list *[]string, items []string) {
+		for _, v := range items {
+			if !seen[v] {
+				seen[v] = true
+				*list = append(*list, v)
 			}
 		}
 	}
-	return emails, skipped
+	for _, id := range ids {
+		ch, ok := c.Channels[id]
+		switch {
+		case ok && ch.Type == "smtp":
+			add(&emails, ch.To)
+		case ok && ch.Type == "brynko":
+			add(&emails, ch.Email)
+			add(&whatsapp, ch.WhatsApp)
+		default:
+			skipped = append(skipped, id)
+		}
+	}
+	return emails, whatsapp, skipped
 }
 
 // Limits bound how much pulse sends and keeps.

@@ -9,8 +9,8 @@ emails you. It emails again when the server checks in again.
 > pulse on web-1 last checked in at 10:02. The server may be down, cut off from the network, or
 > pulse may have stopped.
 
-It is off unless you turn it on. It needs a brynko account with credits; the alert itself costs
-nothing. While the account has no credits, check-ins are still recorded but the relay sends no
+It is off unless you turn it on. It needs a brynko account with credits; the alert email costs
+nothing, and a WhatsApp alert through a brynko relay channel is charged like any relay message. While the account has no credits, check-ins are still recorded but the relay sends no
 alerts, and `pulse status` says so.
 
 ## Turn it on
@@ -35,14 +35,14 @@ watchdog:
 | Setting | Notes |
 |---|---|
 | `key` | This server's relay key, as a `${NAME}` reference to `secrets.env` |
-| `notify` | Email channels whose `to` addresses the relay alerts. Other channels are skipped: Telegram, Slack, WhatsApp and webhook addresses hold secrets that never leave the server. Empty: the server's default channels. With no email address at all, the relay emails the brynko account that turned the alert on |
+| `notify` | Channels to alert: email channels (their `to` addresses) and [brynko relay](channels.md#brynko) channels (their email addresses and WhatsApp numbers). Other channels are skipped: Telegram, Slack, WhatsApp and webhook addresses hold secrets that never leave the server. Empty: the server's default channels. With no address at all, the relay emails the brynko account that turned the alert on |
 | `url` | Where to check in. Leave it unset |
 
 `pulse validate` warns when a named channel is not email, and when no email address is named.
 
 ## What the relay receives
 
-Every minute: the server's name and address, pulse's version, the email addresses to alert, and how
+Every minute: the server's name and address, pulse's version, the email addresses and WhatsApp numbers to alert, and how
 long until the next check-in. Nothing about your monitors, their values or your alerts. pulse sends
 nothing at all unless `watchdog` is set.
 

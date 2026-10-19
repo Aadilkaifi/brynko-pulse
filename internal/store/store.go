@@ -98,8 +98,9 @@ type WatchdogStatus struct {
 	LastOK      time.Time `json:"last_ok,omitzero"`
 	LastError   string    `json:"last_error,omitempty"`
 	LastErrorAt time.Time `json:"last_error_at,omitzero"`
-	Email       []string  `json:"email,omitempty"`   // who the relay alerts
-	Skipped     []string  `json:"skipped,omitempty"` // channels it cannot use (not email)
+	Email       []string  `json:"email,omitempty"`    // who the relay alerts
+	WhatsApp    []string  `json:"whatsapp,omitempty"` // by WhatsApp, through brynko relay channels
+	Skipped     []string  `json:"skipped,omitempty"`  // channels it cannot use (not email)
 }
 
 // KindUndelivered is the history kind of an alert a channel could not deliver.

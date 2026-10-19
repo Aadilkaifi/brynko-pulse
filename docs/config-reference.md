@@ -124,9 +124,10 @@ Local API for tools and a future UI. Never listens on a network port.
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `api_key` | secret `${NAME}` | yes |  |  |
-| `email` | list of email addresses |  |  |  |
-| `whatsapp` | list of phone numbers (+919876543210) |  |  |  |
+| `api_key` | secret `${NAME}` | yes |  | This server's brynko key, as a ${NAME} reference to secrets.env. The app sets it up for you. |
+| `email` | list of email addresses |  |  | Email addresses. |
+| `url` | string |  | `https://cloudagent.brynko.in/api/v1/pulse/alert` | Where the relay takes alerts: an https:// address. Leave it unset. |
+| `whatsapp` | list of phone numbers (+919876543210) |  |  | WhatsApp numbers in international format, for example +919876543210. |
 
 At least one of the delivery lists above is required.
 

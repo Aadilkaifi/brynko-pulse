@@ -260,7 +260,8 @@ func watchdogGoodbye(ctx context.Context, cfgDir string) string {
 	sctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	err := watchdog.Send(sctx, watchdogClient(), cfg.Watchdog.Endpoint(), cfg.Secrets.Resolve(cfg.Watchdog.Key),
-		watchdog.Checkin{Server: cfg.ServerName, Address: cfg.ServerAddress, Version: version.Version, Email: []string{}, Goodbye: true})
+		watchdog.Checkin{Server: cfg.ServerName, Address: cfg.ServerAddress, Version: version.Version, Email: []string{},
+			WhatsApp: []string{}, Goodbye: true})
 	if err != nil {
 		return "Could not tell the brynko relay that pulse is removed (" + err.Error() + "); turn the dead-server alert off in the app"
 	}

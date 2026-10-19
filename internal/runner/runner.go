@@ -530,17 +530,20 @@ func (r *runner) runWatchdog(ctx context.Context) {
 			continue
 		}
 		cfg := g.cfg
-		emails, skipped := cfg.WatchdogEmails()
+		emails, phones, skipped := cfg.WatchdogRecipients()
 		c := watchdog.Checkin{Server: cfg.ServerName, Address: cfg.ServerAddress, Version: r.o.Version,
-			Email: emails, Every: int(watchdog.Every / time.Second)}
+			Email: emails, WhatsApp: phones, Every: int(watchdog.Every / time.Second)}
 		if c.Email == nil {
 			c.Email = []string{}
+		}
+		if c.WhatsApp == nil {
+			c.WhatsApp = []string{}
 		}
 		sctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 		err := watchdog.Send(sctx, client, cfg.Watchdog.Endpoint(), cfg.Secrets.Resolve(cfg.Watchdog.Key), c)
 		cancel()
 		r.watchMu.Lock()
-		st := store.WatchdogStatus{Email: emails, Skipped: skipped}
+		st := store.WatchdogStatus{Email: emails, WhatsApp: phones, Skipped: skipped}
 		if r.watchdog != nil {
 			st.LastOK, st.LastError, st.LastErrorAt = r.watchdog.LastOK, r.watchdog.LastError, r.watchdog.LastErrorAt
 		}

@@ -120,13 +120,14 @@ account and no message template of your own. It is a paid service from brynko, t
 used from brynko account credits. pulse itself stays free and works fully without it; every other
 channel on this page is yours to run.
 
-> **Coming soon.** The relay is not open yet. pulse already accepts the channel below and checks it,
-> and `pulse status` shows it as "cannot be used: not available in this version yet" until a release
-> turns it on. Nothing is sent until then, so you can add it today and keep another channel as well.
+The easiest way is the brynko devOps Agent app: add a channel of type **brynko relay** on the server's
+Monitoring page. The app gets this server's key from your account and stores it in `secrets.env`.
+
+By hand:
 
 1. Create a brynko account at [cloudagent.brynko.in](https://cloudagent.brynko.in) and add credits.
-2. Create a relay key for this server and keep it in `secrets.env`, for example
-   `PULSE_BRYNKO_KEY=...`.
+2. Get this server's key from your account and keep it in `secrets.env`, for example
+   `PULSE_BRYNKO_KEY=...` (the [dead-server alert](dead-server-alert.md) uses the same key).
 3. Add the channel:
 
 ```yaml
@@ -143,11 +144,15 @@ channel on this page is yours to run.
 | `whatsapp` | Phone numbers in international format |
 | `email` | Email addresses |
 | `min_severity` | As for every channel, for example `critical` to pay only for the alerts that matter |
+| `url` | Where the relay takes alerts. Leave it unset |
 
 **What the relay receives:** the alert itself (the server's name and address, the monitor, what is
 wrong, when it started), nothing else from the server. It is used only to deliver that message.
 
 **Costs:** each message delivered uses credits from your brynko account; the prices are on the brynko
 site. When the credits run out, the relay stops delivering and `pulse status` shows the channel's
-last error, so keep a second channel (email through your own server, Telegram or Slack) for
-critical alerts.
+last error ("the account has no credits left for messages"), so keep a second channel (email through
+your own server, Telegram or Slack) for critical alerts.
+
+A brynko relay channel can also receive the [dead-server alert](dead-server-alert.md): name it in
+`watchdog.notify`, and its numbers get a WhatsApp message when the server goes silent.

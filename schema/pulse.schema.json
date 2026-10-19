@@ -257,9 +257,10 @@
           "if": { "required": ["type"], "properties": { "type": { "const": "brynko" } } },
           "then": {
             "properties": {
-              "api_key": { "$ref": "#/$defs/envRef" },
-              "whatsapp": { "$ref": "#/$defs/phoneList" },
-              "email": { "$ref": "#/$defs/emailList" }
+              "api_key": { "$ref": "#/$defs/envRef", "description": "This server's brynko key, as a ${NAME} reference to secrets.env. The app sets it up for you." },
+              "whatsapp": { "$ref": "#/$defs/phoneList", "description": "WhatsApp numbers in international format, for example +919876543210." },
+              "email": { "$ref": "#/$defs/emailList", "description": "Email addresses." },
+              "url": { "type": "string", "pattern": "^https://", "maxLength": 300, "default": "https://cloudagent.brynko.in/api/v1/pulse/alert", "description": "Where the relay takes alerts: an https:// address. Leave it unset." }
             },
             "required": ["api_key"],
             "anyOf": [

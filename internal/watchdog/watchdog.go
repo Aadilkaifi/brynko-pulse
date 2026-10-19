@@ -6,8 +6,8 @@
 // network, or pulse stopped. A dead server cannot send its own alert.
 //
 // It is off unless pulse.yaml has a watchdog section. A check-in carries the
-// server's name and address, pulse's version and the email addresses to alert;
-// nothing about monitors, values or alerts.
+// server's name and address, pulse's version and the email addresses and
+// WhatsApp numbers to alert; nothing about monitors, values or alerts.
 package watchdog
 
 import (
@@ -29,12 +29,13 @@ const Every = time.Minute
 
 // Checkin is what pulse tells the relay.
 type Checkin struct {
-	Server  string   `json:"server"`
-	Address string   `json:"address,omitempty"`
-	Version string   `json:"version"`
-	Email   []string `json:"email"`
-	Every   int      `json:"every"` // seconds until the next check-in
-	Goodbye bool     `json:"goodbye,omitempty"`
+	Server   string   `json:"server"`
+	Address  string   `json:"address,omitempty"`
+	Version  string   `json:"version"`
+	Email    []string `json:"email"`
+	WhatsApp []string `json:"whatsapp"`
+	Every    int      `json:"every"` // seconds until the next check-in
+	Goodbye  bool     `json:"goodbye,omitempty"`
 }
 
 // Errors the relay answers with, worded for status and logs.

@@ -114,9 +114,9 @@ func TestStormGuardHoldsAndSummarises(t *testing.T) {
 
 func TestUnavailableChannelReported(t *testing.T) {
 	d := New(&config.Config{ServerName: "x", Limits: config.Limits{MaxAlertsPerMinute: 5},
-		Channels: map[string]config.Channel{"relay": {Type: "brynko"}}}, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		Channels: map[string]config.Channel{"relay": {Type: "carrier-pigeon"}}}, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if d.Status()["relay"].Unavailable == "" {
-		t.Fatal("brynko channel should be reported as unavailable in this version")
+		t.Fatal("a channel that cannot be built should be reported as unavailable")
 	}
 	if err := d.SendNow(context.Background(), "relay", fire("info")); err == nil {
 		t.Fatal("SendNow to an unavailable channel must fail")
