@@ -173,7 +173,7 @@
     },
 
     "watchdog": {
-      "description": "Dead-server alert through the brynko relay: pulse checks in every minute, and the relay emails you when this server stops checking in (it is down, cut off, or pulse stopped). Off unless set. pulse sends the server's name and address, its version, and the email addresses below; nothing about your monitors.",
+      "description": "Dead-server alert through the brynko relay: pulse checks in every minute, and the relay alerts you when this server stops checking in (it is down, cut off, or pulse stopped). Off unless set. pulse sends the server's name and address, its version, and the email addresses and WhatsApp numbers of the channels it alerts; nothing about your monitors.",
       "type": "object",
       "properties": {
         "key": { "$ref": "#/$defs/envRef", "description": "This server's relay key, as a ${NAME} reference to secrets.env." },
