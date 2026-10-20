@@ -115,6 +115,9 @@ func merge(docs []document) (*Config, error) {
 	if cfg.Limits.CommandOutputBytes == 0 {
 		cfg.Limits.CommandOutputBytes = 64 << 10
 	}
+	if cfg.Limits.MaxHealsPerHour == 0 {
+		cfg.Limits.MaxHealsPerHour = 10
+	}
 	return cfg, nil
 }
 
@@ -310,24 +313,69 @@ const reservedID = "all"
 
 var envRef = regexp.MustCompile(`^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$`)
 
+// checkWatchdog checks that the watchdog's channels exist and that the relay has
+// someone to email: it can only email, since other channels' addresses hold secrets.
+func checkWatchdog(d document, w map[string]any, defaultNotify []any, channels map[string]bool, emailTo map[string]int, r *Result) {
+	ids, own := w["notify"].([]any)
+	if !own {
+		ids = defaultNotify
+	}
+	addresses := 0
+	var skipped []string
+	for i, v := range ids {
+		id := v.(string)
+		switch {
+		case !channels[id] && own:
+			r.Errors = append(r.Errors, issueAt(d, []string{"watchdog", "notify", fmt.Sprint(i)},
+				fmt.Sprintf("channel %q is not defined in %s", id, ChannelsFile)))
+		case !channels[id]:
+			// reported under defaults.notify
+		case emailTo[id] == 0:
+			skipped = append(skipped, id)
+		default:
+			addresses += emailTo[id]
+		}
+	}
+	if len(skipped) > 0 {
+		r.Warnings = append(r.Warnings, issueAt(d, []string{"watchdog"}, fmt.Sprintf(
+			"the watchdog alerts email and brynko relay channels only: %s will not be told when this server goes silent", strings.Join(skipped, ", "))))
+	}
+	if addresses == 0 {
+		r.Warnings = append(r.Warnings, issueAt(d, []string{"watchdog"},
+			"the watchdog names no address, so the brynko relay emails the account that turned the alert on; name an email or brynko relay channel in watchdog.notify or defaults.notify to choose who it alerts"))
+	}
+}
+
 // crossCheck finds problems that span files. It runs only when every file
 // matches the schema, so type assertions below are safe.
 func crossCheck(docs []document, secrets Secrets, r *Result) {
 	channels := map[string]bool{}
+	emailTo := map[string]int{} // email or brynko relay channel -> how many addresses and numbers
 	var defaultNotify []any
+	var watchdog map[string]any
 	var pulseDoc document
 	for _, d := range docs {
 		m := d.value.(map[string]any)
 		switch d.kind {
 		case kindChannels:
-			for id := range m["channels"].(map[string]any) {
+			for id, ch := range m["channels"].(map[string]any) {
 				channels[id] = true
+				switch c, _ := ch.(map[string]any); c["type"] {
+				case "smtp":
+					to, _ := c["to"].([]any)
+					emailTo[id] = len(to)
+				case "brynko":
+					email, _ := c["email"].([]any)
+					phones, _ := c["whatsapp"].([]any)
+					emailTo[id] = len(email) + len(phones)
+				}
 			}
 		case kindPulse:
 			pulseDoc = d
 			if def, ok := m["defaults"].(map[string]any); ok {
 				defaultNotify, _ = def["notify"].([]any)
 			}
+			watchdog, _ = m["watchdog"].(map[string]any)
 		}
 	}
 
@@ -338,8 +386,18 @@ func crossCheck(docs []document, secrets Secrets, r *Result) {
 		}
 	}
 
+	if watchdog != nil {
+		checkWatchdog(pulseDoc, watchdog, defaultNotify, channels, emailTo, r)
+	}
+
 	monitorIDs := map[string]string{}
 	monitors := 0
+	type healDep struct {
+		doc          document
+		path         []string
+		monitor, dep string
+	}
+	var healDeps []healDep
 	var silent []Issue
 	for _, d := range docs {
 		if d.kind != kindMonitors {
@@ -368,6 +426,24 @@ func crossCheck(docs []document, secrets Secrets, r *Result) {
 					r.Errors = append(r.Errors, issueAt(d, append(base, "json_expect"), "json_expect: "+err.Error()))
 				}
 			}
+			if heal, ok := mon["heal"].(map[string]any); ok {
+				if t, _ := mon["type"].(string); len(HealSteps(t)) == 0 {
+					r.Errors = append(r.Errors, issueAt(d, append(base, "heal"), fmt.Sprintf(
+						"%s monitors cannot have heal: restarting something or running a program does not fix what they watch. Remove heal", t)))
+				}
+				steps, _ := heal["steps"].([]any)
+				for j, step := range steps {
+					if n := len(step.(map[string]any)); n != 1 {
+						r.Errors = append(r.Errors, issueAt(d, append(base, "heal", "steps", fmt.Sprint(j)),
+							"heal: each step does one thing: restart_service, restart_container or run. Put them in separate steps"))
+					}
+				}
+				deps, _ := heal["only_if_ok"].([]any)
+				for j, dep := range deps {
+					healDeps = append(healDeps, healDep{doc: d, path: append(base, "heal", "only_if_ok", fmt.Sprint(j)),
+						monitor: id, dep: dep.(string)})
+				}
+			}
 			notify, has := mon["notify"].([]any)
 			for j, ch := range notify {
 				if !channels[ch.(string)] {
@@ -379,6 +455,14 @@ func crossCheck(docs []document, secrets Secrets, r *Result) {
 				silent = append(silent, issueAt(d, base,
 					fmt.Sprintf("monitor %q has no channels, so its alerts go nowhere. Add notify here or under defaults in %s.", id, PulseFile)))
 			}
+		}
+	}
+	for _, h := range healDeps {
+		switch _, known := monitorIDs[h.dep]; {
+		case h.dep == h.monitor:
+			r.Errors = append(r.Errors, issueAt(h.doc, h.path, "heal: only_if_ok lists the monitor itself; list the monitors it depends on"))
+		case !known:
+			r.Errors = append(r.Errors, issueAt(h.doc, h.path, fmt.Sprintf("heal: only_if_ok names %q, which is not a monitor", h.dep)))
 		}
 	}
 	// One warning, not one per monitor, when the fix is a single line in pulse.yaml.

@@ -98,17 +98,25 @@ func TestStormGuardHoldsAndSummarises(t *testing.T) {
 	if s.count() != 4 {
 		t.Fatalf("sent %d, want 3 alerts plus 1 summary", s.count())
 	}
-	last := s.got[len(s.got)-1]
-	if last.Kind != alert.KindSummary || !strings.Contains(last.Detail, "7 more alerts") {
-		t.Fatalf("summary = %+v", last)
+	// Workers deliver in parallel, so the summary is not always the last one sent.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var summaries []alert.Alert
+	for _, a := range s.got {
+		if a.Kind == alert.KindSummary {
+			summaries = append(summaries, a)
+		}
+	}
+	if len(summaries) != 1 || !strings.Contains(summaries[0].Detail, "7 more alerts") {
+		t.Fatalf("summaries = %+v", summaries)
 	}
 }
 
 func TestUnavailableChannelReported(t *testing.T) {
 	d := New(&config.Config{ServerName: "x", Limits: config.Limits{MaxAlertsPerMinute: 5},
-		Channels: map[string]config.Channel{"relay": {Type: "brynko"}}}, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		Channels: map[string]config.Channel{"relay": {Type: "carrier-pigeon"}}}, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if d.Status()["relay"].Unavailable == "" {
-		t.Fatal("brynko channel should be reported as unavailable in this version")
+		t.Fatal("a channel that cannot be built should be reported as unavailable")
 	}
 	if err := d.SendNow(context.Background(), "relay", fire("info")); err == nil {
 		t.Fatal("SendNow to an unavailable channel must fail")
@@ -128,4 +136,80 @@ func TestDispatchAfterStopIsSafe(t *testing.T) {
 		t.Fatal("dispatch after stop must not queue")
 	}
 	d.flushHeld()
+}
+
+// A channel that still fails after every retry is reported once, with its error, so the
+// history can say the alert did not arrive. One that recovers on a retry is not reported.
+func TestFailureReportedAfterRetries(t *testing.T) {
+	bad, flaky := &fakeSender{failures: 99}, &fakeSender{failures: 1}
+	d := newTest(10, map[string]*fakeSender{"mail": bad, "tg": flaky}, nil)
+	var mu sync.Mutex
+	var got []Failure
+	d.OnFailure(func(f Failure) { mu.Lock(); got = append(got, f); mu.Unlock() })
+	ctx, cancel := context.WithCancel(context.Background())
+	d.Start(ctx)
+	a := fire("critical")
+	a.At = time.Date(2026, 10, 17, 20, 23, 20, 0, time.UTC)
+	d.Dispatch(a, []string{"mail", "tg"})
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	d.Stop(5 * time.Second)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 1 || got[0].Channel != "mail" || got[0].Err != "temporary failure" || !got[0].Alert.At.Equal(a.At) {
+		t.Fatalf("failures = %+v", got)
+	}
+	if flaky.count() != 1 {
+		t.Fatalf("tg sent %d, want 1", flaky.count())
+	}
+}
+
+// A reload keeps the last error of a channel it did not change, so the warning stays; a
+// changed channel, or changed secrets, start fresh.
+func TestReloadKeepsStatusOfUnchangedChannels(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	mail := config.Channel{Type: "webhook", URL: "https://example.invalid/a"}
+	hook := config.Channel{Type: "webhook", URL: "https://example.invalid/b"}
+	cfg := func(m, h config.Channel, sec config.Secrets) *config.Config {
+		return &config.Config{Limits: config.Limits{MaxAlertsPerMinute: 5}, Secrets: sec,
+			Channels: map[string]config.Channel{"mail": m, "hook": h}}
+	}
+	broken := func(d *Dispatcher) {
+		for _, id := range []string{"mail", "hook"} {
+			st := d.status[id]
+			st.LastError, st.LastErrorAt = "no such host", time.Now()
+			d.status[id] = st
+		}
+	}
+	prev := New(cfg(mail, hook, nil), nil, log)
+	broken(prev)
+	fixed := hook
+	fixed.URL = "https://example.invalid/c"
+	next := New(cfg(mail, fixed, nil), nil, log)
+	next.KeepStatus(prev)
+	if next.Status()["mail"].LastError != "no such host" || next.Status()["hook"].LastError != "" {
+		t.Fatalf("status = %+v", next.Status())
+	}
+	other := New(cfg(mail, hook, config.Secrets{"X": "1"}), nil, log)
+	other.KeepStatus(prev)
+	if other.Status()["mail"].LastError != "" {
+		t.Fatalf("changed secrets must start fresh: %+v", other.Status())
+	}
+}
+
+// After a restart the saved health comes back for channels of the same type only.
+func TestRestoreSavedStatus(t *testing.T) {
+	d := New(&config.Config{Limits: config.Limits{MaxAlertsPerMinute: 5}, Channels: map[string]config.Channel{
+		"mail": {Type: "webhook", URL: "https://example.invalid/a"}, "hook": {Type: "webhook", URL: "https://example.invalid/b"}}},
+		nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	at := time.Date(2026, 10, 17, 20, 23, 32, 0, time.UTC)
+	d.Restore(map[string]store.ChannelStatus{
+		"mail": {Type: "webhook", LastError: "no such host", LastErrorAt: at},
+		"hook": {Type: "smtp", LastError: "was an email channel before"},
+		"gone": {Type: "webhook", LastError: "removed"},
+	})
+	st := d.Status()
+	if st["mail"].LastError != "no such host" || !st["mail"].LastErrorAt.Equal(at) || st["hook"].LastError != "" || len(st) != 2 {
+		t.Fatalf("status = %+v", st)
+	}
 }

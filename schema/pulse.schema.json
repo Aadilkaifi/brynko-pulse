@@ -12,6 +12,7 @@
     "limits": { "$ref": "#/$defs/limits" },
     "api": { "$ref": "#/$defs/api" },
     "maintenance": { "$ref": "#/$defs/maintenanceList" },
+    "watchdog": { "$ref": "#/$defs/watchdog" },
     "channels": { "$ref": "#/$defs/channelMap" },
     "monitors": { "$ref": "#/$defs/monitorList" }
   },
@@ -29,7 +30,8 @@
         "defaults": { "$ref": "#/$defs/defaults" },
         "limits": { "$ref": "#/$defs/limits" },
         "api": { "$ref": "#/$defs/api" },
-        "maintenance": { "$ref": "#/$defs/maintenanceList" }
+        "maintenance": { "$ref": "#/$defs/maintenanceList" },
+        "watchdog": { "$ref": "#/$defs/watchdog" }
       },
       "required": ["version", "server_name"],
       "additionalProperties": false
@@ -155,6 +157,10 @@
         "command_output_bytes": {
           "description": "Output kept from a command check.",
           "type": "integer", "minimum": 1024, "maximum": 1048576, "default": 65536
+        },
+        "max_heals_per_hour": {
+          "description": "Self-healing attempts allowed per hour across all monitors on this server. Above this, pulse stops trying and alerts.",
+          "type": "integer", "minimum": 1, "maximum": 100, "default": 10
         }
       },
       "additionalProperties": false
@@ -163,6 +169,18 @@
       "description": "Local API for tools and a future UI. Never listens on a network port.",
       "type": "object",
       "properties": { "enabled": { "type": "boolean", "default": false } },
+      "additionalProperties": false
+    },
+
+    "watchdog": {
+      "description": "Dead-server alert through the brynko relay: pulse checks in every minute, and the relay alerts you when this server stops checking in (it is down, cut off, or pulse stopped). Off unless set. pulse sends the server's name and address, its version, and the email addresses and WhatsApp numbers of the channels it alerts; nothing about your monitors.",
+      "type": "object",
+      "properties": {
+        "key": { "$ref": "#/$defs/envRef", "description": "This server's relay key, as a ${NAME} reference to secrets.env." },
+        "notify": { "$ref": "#/$defs/notifyList", "description": "Email channels whose addresses the relay alerts. Other channel types are skipped: their addresses hold secrets that never leave the server. Empty: the server's default channels (defaults.notify)." },
+        "url": { "type": "string", "pattern": "^https://", "maxLength": 300, "default": "https://cloudagent.brynko.in/api/v1/pulse/checkin", "description": "Where to check in: an https:// address. Leave it unset for the brynko relay." }
+      },
+      "required": ["key"],
       "additionalProperties": false
     },
 
@@ -239,9 +257,10 @@
           "if": { "required": ["type"], "properties": { "type": { "const": "brynko" } } },
           "then": {
             "properties": {
-              "api_key": { "$ref": "#/$defs/envRef" },
-              "whatsapp": { "$ref": "#/$defs/phoneList" },
-              "email": { "$ref": "#/$defs/emailList" }
+              "api_key": { "$ref": "#/$defs/envRef", "description": "This server's brynko key, as a ${NAME} reference to secrets.env. The app sets it up for you." },
+              "whatsapp": { "$ref": "#/$defs/phoneList", "description": "WhatsApp numbers in international format, for example +919876543210." },
+              "email": { "$ref": "#/$defs/emailList", "description": "Email addresses." },
+              "url": { "type": "string", "pattern": "^https://", "maxLength": 300, "default": "https://cloudagent.brynko.in/api/v1/pulse/alert", "description": "Where the relay takes alerts: an https:// address. Leave it unset." }
             },
             "required": ["api_key"],
             "anyOf": [
@@ -257,6 +276,38 @@
     "monitorList": {
       "type": "array",
       "items": { "$ref": "#/$defs/monitor" }
+    },
+    "heal": {
+      "description": "Self-healing: what pulse does when this monitor fails. In ask mode pulse prepares the fix and waits for you to approve it; in auto mode it runs the fix by itself. Either way it waits until the problem has lasted the monitor's for (at least 30s), runs the steps in order, and waits verify for the monitor to be OK again.",
+      "type": "object",
+      "properties": {
+        "mode": { "enum": ["off", "ask", "auto"], "default": "ask", "description": "ask: prepare the fix and wait for approval (pulse fix approve, or the app). auto: run it by itself; after 2 automatic fixes that did not help in one problem, or when the tries are used up, the next fix waits for approval. off: keep the rule but do nothing." },
+        "steps": {
+          "type": "array", "minItems": 1, "maxItems": 10,
+          "description": "What to do, in order. pulse stops at the first step that fails.",
+          "items": { "$ref": "#/$defs/healStep" }
+        },
+        "only_if_ok": {
+          "type": "array", "items": { "$ref": "#/$defs/id" }, "uniqueItems": true,
+          "description": "Monitors that must be OK before a fix. When one of them is failing, it is the likely cause: pulse does not fix this one and says so in the alert."
+        },
+        "timeout": { "$ref": "#/$defs/duration", "default": "90s", "description": "How long all the steps together may take." },
+        "attempts": { "type": "integer", "minimum": 1, "maximum": 10, "default": 3, "description": "How many automatic fixes within the window. Fixes you approve are not counted." },
+        "within": { "$ref": "#/$defs/duration", "default": "1h", "description": "The window automatic fixes are counted in." },
+        "verify": { "$ref": "#/$defs/duration", "default": "2m", "description": "How long to wait after a fix for the monitor to be OK again before counting it as not helping." }
+      },
+      "required": ["steps"],
+      "additionalProperties": false
+    },
+    "healStep": {
+      "type": "object",
+      "description": "One step: restart services, restart containers, or run a program.",
+      "properties": {
+        "restart_service": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1, "maxLength": 256 }, "description": "Services to restart, in order: on Linux systemd units without .service, on Windows service names. pulse gets the right to restart only these." },
+        "restart_container": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$", "maxLength": 256 }, "description": "Docker containers to restart, in order, by name as docker ps shows it." },
+        "run": { "type": "array", "minItems": 1, "items": { "type": "string" }, "description": "A program and its arguments. Never run through a shell; it runs as the pulse service account." }
+      },
+      "additionalProperties": false
     },
     "monitor": {
       "type": "object",
@@ -275,7 +326,8 @@
         "for": { "$ref": "#/$defs/duration", "description": "How long the problem must last before you are alerted, so a short spike does not wake anyone. Empty: the server's default (defaults.for), or at once when it sets none." },
         "severity": { "$ref": "#/$defs/severity", "description": "How serious an alert is. Empty: the server's default (defaults.severity)." },
         "notify": { "$ref": "#/$defs/notifyList", "description": "Channels told about this monitor. Empty: the server's default channels (defaults.notify)." },
-        "cooldown": { "$ref": "#/$defs/duration", "description": "While the problem lasts, the alert is sent again this often, until it is over. Empty: the server's default (defaults.cooldown)." }
+        "cooldown": { "$ref": "#/$defs/duration", "description": "While the problem lasts, the alert is sent again this often, until it is over. Empty: the server's default (defaults.cooldown)." },
+        "heal": { "$ref": "#/$defs/heal" }
       },
       "required": ["id", "type"],
       "allOf": [

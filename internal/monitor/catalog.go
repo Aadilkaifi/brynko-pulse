@@ -3,6 +3,8 @@
 
 package monitor
 
+import "github.com/Aadilkaifi/brynko-pulse/internal/config"
+
 // TypeInfo describes one monitor type for people and tools: what it watches, the
 // values its checks produce, and the condition it uses when alert_when is not set.
 // It is published in the JSON Schema (x-types), so a form can offer the right
@@ -31,6 +33,8 @@ type TypeInfo struct {
 	Instant string `json:"instant,omitempty"`
 	// Choice offers some of the type's fields as one pick, so a form shows only the chosen option's fields.
 	Choice *Choice `json:"choice,omitempty"`
+	// Heal lists the kinds of heal steps the type supports, from config.HealSteps; none when a fix cannot help.
+	Heal []string `json:"heal,omitempty"`
 	// Because lists what can make the default flag false, so a message says which ("text not found").
 	Because []Reason    `json:"-"`
 	OS      string      `json:"os,omitempty"` // "linux" when only Linux supports the type
@@ -80,6 +84,12 @@ func flag(name, label, help string) ValueInfo {
 }
 
 // Catalog lists every monitor type, in the order a picker shows them.
+func init() {
+	for i := range Catalog {
+		Catalog[i].Heal = config.HealSteps(Catalog[i].Type)
+	}
+}
+
 var Catalog = []TypeInfo{
 	{Type: "cpu", Label: "CPU", Group: "System", Summary: "Usage across all cores, measured between two checks.",
 		Help:    "Busy servers often spike for a few seconds; wait a few minutes before alerting so only lasting load wakes anyone.",

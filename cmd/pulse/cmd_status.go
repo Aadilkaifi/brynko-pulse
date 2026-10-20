@@ -106,7 +106,26 @@ func cmdStatus(args []string, stdout, stderr io.Writer) int {
 		}
 		tw.Flush()
 	}
+	if w := snap.Watchdog; w != nil {
+		fmt.Fprintln(stdout)
+		fmt.Fprintln(stdout, "Dead-server alert: "+watchdogState(*w))
+	}
 	return exitOK
+}
+
+func watchdogState(w store.WatchdogStatus) string {
+	to := "nobody (no email channel)"
+	if len(w.Email) > 0 {
+		to = strings.Join(w.Email, ", ")
+	}
+	switch {
+	case w.LastError != "" && w.LastErrorAt.After(w.LastOK):
+		return fmt.Sprintf("last check-in failed %s ago: %s", alert.Human(time.Since(w.LastErrorAt)), oneLine(w.LastError))
+	case !w.LastOK.IsZero():
+		return fmt.Sprintf("on, checked in %s ago; alerts %s", alert.Human(time.Since(w.LastOK)), to)
+	default:
+		return "on, not checked in yet; alerts " + to
+	}
 }
 
 func channelState(c store.ChannelStatus) string {
@@ -162,8 +181,12 @@ func cmdHistory(args []string, stdout, stderr io.Writer) int {
 		if r.Silenced {
 			kind += " (silenced)"
 		}
+		detail := r.Detail
+		if r.Kind == store.KindUndelivered {
+			detail = "not delivered to " + strings.Join(r.Channels, ", ") + ": " + detail
+		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", r.At.Local().Format("2006-01-02 15:04"),
-			kind, r.Severity, r.Monitor, oneLine(r.Detail))
+			kind, r.Severity, r.Monitor, oneLine(detail))
 	}
 	tw.Flush()
 	return exitOK

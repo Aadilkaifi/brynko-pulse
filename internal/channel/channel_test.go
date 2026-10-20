@@ -87,11 +87,40 @@ func TestSlack(t *testing.T) {
 	}
 }
 
-func TestNotAvailableTypes(t *testing.T) {
-	for _, typ := range []string{"brynko"} {
-		if _, err := New(config.Channel{Type: typ}, nil, nil); !errors.Is(err, ErrNotAvailable) {
-			t.Errorf("%s: %v", typ, err)
+// The brynko relay gets the alert and who to tell, with the server's key, and its
+// refusals are worded so status says what to do.
+func TestBrynkoRelay(t *testing.T) {
+	var got map[string]any
+	var auth string
+	status := http.StatusAccepted
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth = r.Header.Get("Authorization")
+		json.NewDecoder(r.Body).Decode(&got)
+		w.WriteHeader(status)
+	}))
+	defer srv.Close()
+	ch, err := New(config.Channel{Type: "brynko", APIKey: "${KEY}", URL: srv.URL, Email: []string{"ops@example.com"},
+		WhatsApp: []string{"+919876543210"}}, config.Secrets{"KEY": "bpk_x"}, srv.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ch.Send(context.Background(), sample); err != nil {
+		t.Fatal(err)
+	}
+	a, _ := got["alert"].(map[string]any)
+	if auth != "Bearer bpk_x" || a["monitor"] != "disk" || got["subject"] == "" ||
+		len(got["email"].([]any)) != 1 || len(got["whatsapp"].([]any)) != 1 {
+		t.Fatalf("relay got %v with %q", got, auth)
+	}
+	for code, want := range map[int]error{http.StatusUnauthorized: ErrRelayKey, http.StatusPaymentRequired: ErrRelayCredits} {
+		status = code
+		if err := ch.Send(context.Background(), sample); !errors.Is(err, want) {
+			t.Fatalf("%d: %v", code, err)
 		}
+	}
+	empty, _ := New(config.Channel{Type: "brynko", APIKey: "${MISSING}"}, config.Secrets{}, srv.Client())
+	if err := empty.Send(context.Background(), sample); err == nil || !strings.Contains(err.Error(), "api_key is empty") {
+		t.Fatalf("no key: %v", err)
 	}
 }
 

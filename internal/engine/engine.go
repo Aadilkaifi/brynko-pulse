@@ -213,6 +213,18 @@ func (e *Engine) Remind(id string, now time.Time) *Event {
 	return &Event{Kind: EventFiring, Monitor: id, Detail: st.Detail, Since: st.ProblemSince, At: now}
 }
 
+// Get returns one monitor's state; Unknown when it has not been checked.
+func (e *Engine) Get(id string) State {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	st, ok := e.states[id]
+	if !ok {
+		return State{Status: Unknown}
+	}
+	st.Changes = append([]time.Time(nil), st.Changes...)
+	return st
+}
+
 // Snapshot returns a copy of every monitor's state.
 func (e *Engine) Snapshot() map[string]State {
 	e.mu.Lock()

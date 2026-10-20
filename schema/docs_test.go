@@ -229,6 +229,11 @@ func renderConfigDocs(t *testing.T) []byte {
 			fmt.Fprintf(&b, "Exactly one of %s.\n\n", strings.Join(parts, ", "))
 		}
 	}
+	b.WriteString("## Monitor fields with their own section\n\n")
+	section(&b, d, "heal", "heal")
+	section(&b, d, "healStep", "healStep")
+	b.WriteString("Each step has exactly one of `restart_service`, `restart_container` or `run`. `ssl`, `file` and " +
+		"`heartbeat` monitors cannot have `heal`. See [self-healing.md](self-healing.md).\n\n")
 	return bytes.TrimRight(b.Bytes(), "\n")
 }
 

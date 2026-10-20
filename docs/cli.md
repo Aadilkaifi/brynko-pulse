@@ -225,6 +225,7 @@ Flags:
 - [`pulse status`](#pulse-status): Show every monitor and channel right now
 - [`pulse history`](#pulse-history): Show recent alerts
 - [`pulse silence`](#pulse-silence): Pause alerts for a while, for example during a deploy
+- [`pulse fix`](#pulse-fix): Approve or dismiss a fix that self-healing prepared
 - [`pulse ping`](#pulse-ping): Record a heartbeat, for jobs that check in
 
 ### pulse install
@@ -342,6 +343,31 @@ Flags:
     	print JSON
   -reason string
     	why, shown in pulse status and the history
+```
+
+### pulse fix
+
+```text
+Approve or dismiss a fix that self-healing prepared.
+
+Usage:
+  pulse fix approve <monitor-id> | fix dismiss <monitor-id> [--id fix-id] [flags]
+
+Examples:
+  pulse fix approve web     run the fix waiting for monitor web
+  pulse fix dismiss web     turn it down; no other fix is offered until web works again
+
+A fix waits for approval when its monitor's heal mode is ask, or when automatic
+fixes did not help. pulse status shows what it would do. Use --id to approve only
+the fix that status showed, not a newer one.
+
+Flags:
+  -data string
+    	where state and alert history are kept (default "/var/lib/brynko-pulse")
+  -id string
+    	approve or dismiss only this fix (from pulse status --json)
+  -json
+    	print JSON
 ```
 
 ### pulse ping

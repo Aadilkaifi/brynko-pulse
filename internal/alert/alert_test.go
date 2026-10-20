@@ -67,3 +67,34 @@ func TestAtLeast(t *testing.T) {
 		t.Fatal("severity ordering is wrong")
 	}
 }
+
+// Self-healing messages say what broke, what pulse did and how it ended.
+func TestHealMessages(t *testing.T) {
+	at := time.Date(2026, 10, 17, 10, 5, 0, 0, time.UTC)
+	healed := Alert{Server: "web-1", Monitor: "web", MonitorName: "nginx", Kind: KindHealed, Severity: "warning",
+		Detail: "Running", At: at, Duration: 2 * time.Minute,
+		Heal: "It failed (stopped). pulse restarted nginx at 10:03 and it works again."}
+	if got := healed.Subject(); got != "[Fixed] web-1: nginx was fixed by pulse after 2m" {
+		t.Errorf("subject = %q", got)
+	}
+	text := healed.Text()
+	for _, want := range []string{"Healing   It failed (stopped). pulse restarted nginx at 10:03", "Now       Running"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("text lacks %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "Severity") || healed.colour() != "#1a7f37" {
+		t.Errorf("a fixed problem reads as good news:\n%s", text)
+	}
+
+	failed := Alert{Server: "web-1", Monitor: "web", MonitorName: "nginx", Kind: KindHealFailed, Severity: "critical",
+		Detail: "stopped", Rule: "the service is not running", At: at, Since: at.Add(-10 * time.Minute),
+		Heal: "pulse tried to restart nginx 3 times in 1h and it still fails."}
+	if got := failed.Subject(); got != "[Could not fix] web-1: nginx: stopped" {
+		t.Errorf("subject = %q", got)
+	}
+	if !strings.Contains(failed.Text(), "Alerts when the service is not running.") || failed.colour() != "#c0392b" ||
+		!strings.Contains(failed.HTML(), "tried to restart nginx 3 times") {
+		t.Errorf("give-up message:\n%s", failed.Text())
+	}
+}

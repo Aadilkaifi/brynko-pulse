@@ -22,6 +22,7 @@ type Config struct {
 	Channels      map[string]Channel `json:"channels"`
 	Monitors      []Monitor          `json:"monitors"`
 	Maintenance   []Maintenance      `json:"maintenance"`
+	Watchdog      *Watchdog          `json:"watchdog,omitempty"`
 	// Secrets is never printed or saved.
 	Secrets Secrets `json:"-"`
 }
@@ -66,10 +67,67 @@ type Maintenance struct {
 	Monitors []string `json:"monitors,omitempty"`
 }
 
+// DefaultWatchdogURL is the brynko relay's check-in address.
+const DefaultWatchdogURL = "https://cloudagent.brynko.in/api/v1/pulse/checkin"
+
+// Watchdog has pulse check in with the brynko relay every minute, so the relay
+// can alert when the server goes silent. Off unless set.
+type Watchdog struct {
+	Key    string   `json:"key"`              // ${NAME} reference to the relay key
+	Notify []string `json:"notify,omitempty"` // email channels to alert; empty: defaults.notify
+	URL    string   `json:"url,omitempty"`
+}
+
+// Endpoint is where pulse checks in.
+func (w Watchdog) Endpoint() string {
+	if w.URL != "" {
+		return w.URL
+	}
+	return DefaultWatchdogURL
+}
+
+// WatchdogRecipients returns who the relay alerts, from the channels the
+// watchdog names (or the default channels): the addresses of email channels,
+// and the email addresses and WhatsApp numbers of brynko relay channels. Other
+// channels are skipped, because their addresses hold secrets.
+func (c *Config) WatchdogRecipients() (emails, whatsapp, skipped []string) {
+	if c.Watchdog == nil {
+		return nil, nil, nil
+	}
+	ids := c.Watchdog.Notify
+	if len(ids) == 0 {
+		ids = c.Defaults.Notify
+	}
+	seen := map[string]bool{}
+	add := func(list *[]string, items []string) {
+		for _, v := range items {
+			if !seen[v] {
+				seen[v] = true
+				*list = append(*list, v)
+			}
+		}
+	}
+	for _, id := range ids {
+		ch, ok := c.Channels[id]
+		switch {
+		case ok && ch.Type == "smtp":
+			add(&emails, ch.To)
+		case ok && ch.Type == "brynko":
+			add(&emails, ch.Email)
+			add(&whatsapp, ch.WhatsApp)
+		default:
+			skipped = append(skipped, id)
+		}
+	}
+	return emails, whatsapp, skipped
+}
+
 // Limits bound how much pulse sends and keeps.
 type Limits struct {
 	MaxAlertsPerMinute int `json:"max_alerts_per_minute"`
 	CommandOutputBytes int `json:"command_output_bytes"`
+	// MaxHealsPerHour caps self-healing attempts across all monitors of the server.
+	MaxHealsPerHour int `json:"max_heals_per_hour"`
 }
 
 // API configures the local API.
@@ -145,8 +203,89 @@ type Monitor struct {
 	ExpectEvery     Duration        `json:"expect_every,omitempty"`
 	Grace           Duration        `json:"grace,omitempty"`
 
+	// Heal is what pulse does by itself when the monitor fails. Nil: nothing.
+	Heal *Heal `json:"heal,omitempty"`
+
 	// SourceFile is the config file the monitor came from, for messages.
 	SourceFile string `json:"-"`
+}
+
+// Heal modes.
+const (
+	HealOff  = "off"  // the rule is kept but does nothing
+	HealAsk  = "ask"  // pulse prepares the fix and waits for a person to approve it
+	HealAuto = "auto" // pulse runs the fix by itself, a limited number of times
+)
+
+// Heal step kinds, for the catalog.
+const (
+	StepRestartService   = "restart_service"
+	StepRestartContainer = "restart_container"
+	StepRun              = "run"
+)
+
+// Heal is what pulse does when a monitor fails: ordered steps, run by itself
+// (auto) or after a person approves them (ask).
+type Heal struct {
+	Mode     string     `json:"mode,omitempty"`
+	Steps    []HealStep `json:"steps"`
+	OnlyIfOK []string   `json:"only_if_ok,omitempty"` // monitors that must be OK, else the cause is likely there
+	Timeout  Duration   `json:"timeout,omitempty"`    // how long all steps together may take
+	Attempts int        `json:"attempts,omitempty"`
+	Within   Duration   `json:"within,omitempty"` // Attempts counts automatic tries within this long
+	Verify   Duration   `json:"verify,omitempty"` // how long to wait for the monitor to be OK again
+}
+
+// HealStep is one step of a fix. Exactly one field is set.
+type HealStep struct {
+	RestartService   []string `json:"restart_service,omitempty"`
+	RestartContainer []string `json:"restart_container,omitempty"`
+	Run              []string `json:"run,omitempty"` // the program and its arguments, never a shell
+}
+
+// Effective returns the heal rule with defaults filled in.
+func (h Heal) Effective() Heal {
+	if h.Mode == "" {
+		h.Mode = HealAsk
+	}
+	if h.Attempts == 0 {
+		h.Attempts = 3
+	}
+	if h.Within == 0 {
+		h.Within = Duration(time.Hour)
+	}
+	if h.Verify == 0 {
+		h.Verify = Duration(2 * time.Minute)
+	}
+	if h.Timeout == 0 {
+		h.Timeout = Duration(90 * time.Second)
+	}
+	return h
+}
+
+// HealSteps lists the step kinds a monitor type may use. A fix helps when the
+// problem comes from something pulse can restart or a program can repair; it
+// cannot renew a certificate, refresh a file or make a job check in, so those
+// types have none.
+func HealSteps(monitorType string) []string {
+	switch monitorType {
+	case "ssl", "file", "heartbeat":
+		return nil
+	}
+	return []string{StepRestartService, StepRestartContainer, StepRun}
+}
+
+// HealServices lists the services this monitor's fix restarts, which needs a
+// right the service account does not have by default. Empty when it is off.
+func (m Monitor) HealServices() []string {
+	if !m.IsEnabled() || m.Heal == nil || m.Heal.Effective().Mode == HealOff {
+		return nil
+	}
+	var out []string
+	for _, s := range m.Heal.Steps {
+		out = append(out, s.RestartService...)
+	}
+	return out
 }
 
 // LogSource names where a log monitor reads from.

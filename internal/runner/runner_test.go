@@ -19,6 +19,7 @@ import (
 
 	"github.com/Aadilkaifi/brynko-pulse/internal/alert"
 	"github.com/Aadilkaifi/brynko-pulse/internal/engine"
+	"github.com/Aadilkaifi/brynko-pulse/internal/notify"
 	"github.com/Aadilkaifi/brynko-pulse/internal/platform"
 	"github.com/Aadilkaifi/brynko-pulse/internal/silence"
 	"github.com/Aadilkaifi/brynko-pulse/internal/store"
@@ -220,5 +221,124 @@ func TestSilenceHoldsThenReminds(t *testing.T) {
 	defer mu.Unlock()
 	if len(got) != 1 || got[0].Kind != alert.KindFiring || !strings.Contains(got[0].Detail, "after the silence ended") {
 		t.Fatalf("want one reminder after the silence, got %+v", got)
+	}
+}
+
+// An alert a channel could not deliver gets its own history line, tied to the alert by its
+// kind and time, so "sent to email" is never read as "email arrived".
+func TestUndeliveredAlertIsInHistory(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &runner{o: Options{Log: slog.New(slog.NewTextHandler(io.Discard, nil))}, st: st}
+	at := time.Date(2026, 10, 17, 20, 23, 20, 0, time.UTC)
+	r.undelivered(notify.Failure{Channel: "email", Err: "connect to smtp.example.co:587: no such host",
+		Alert: alert.Alert{Monitor: "api", MonitorName: "API", Kind: alert.KindFiring, Severity: "critical", At: at}})
+	recs, _ := store.History(dir, 5)
+	if len(recs) != 1 {
+		t.Fatalf("history = %+v", recs)
+	}
+	got := recs[0]
+	if got.Kind != store.KindUndelivered || got.Monitor != "api" || got.Name != "API" || got.Severity != "critical" ||
+		got.AlertKind != alert.KindFiring || !got.AlertAt.Equal(at) || len(got.Channels) != 1 || got.Channels[0] != "email" ||
+		!strings.Contains(got.Detail, "no such host") {
+		t.Fatalf("record = %+v", got)
+	}
+}
+
+// A restart keeps a channel's last delivery error while channels.yaml and secrets.env are
+// as they were when it was saved, and starts fresh once either changed.
+func TestRestartKeepsChannelHealth(t *testing.T) {
+	for _, changed := range []bool{false, true} {
+		cfgDir, dataDir := t.TempDir(), t.TempDir()
+		writeFiles(t, cfgDir, map[string]string{
+			"pulse.yaml":      "version: 1\nserver_name: test-box\ndefaults:\n  interval: 1h\n",
+			"channels.yaml":   "channels:\n  hook:\n    type: webhook\n    url: https://example.invalid/h\n",
+			"monitors/m.yaml": "monitors:\n  - id: mem\n    type: memory\n    alert_when: used_percent > 99\n",
+		})
+		old := time.Now().Add(-time.Hour)
+		for _, f := range []string{"pulse.yaml", "channels.yaml", "monitors/m.yaml"} {
+			os.Chtimes(filepath.Join(cfgDir, filepath.FromSlash(f)), old, old)
+		}
+		st, _ := store.Open(dataDir)
+		st.Save(store.Snapshot{Server: "test-box", Updated: time.Now().Add(-time.Minute),
+			Channels: map[string]store.ChannelStatus{"hook": {Type: "webhook", LastError: "no such host",
+				LastErrorAt: time.Now().Add(-2 * time.Minute)}}})
+		if changed {
+			os.Chtimes(filepath.Join(cfgDir, "channels.yaml"), time.Now(), time.Now())
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() {
+			done <- Run(ctx, Options{ConfigDir: cfgDir, DataDir: dataDir, Platform: platform.Current(),
+				Log: slog.New(slog.NewTextHandler(io.Discard, nil)), SkipSecurityCheck: true, Version: "test"})
+		}()
+		waitFor(t, func() bool {
+			snap, err := store.ReadState(dataDir)
+			return err == nil && snap != nil && snap.PID != 0
+		})
+		cancel()
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		snap, _ := store.ReadState(dataDir)
+		if got := snap.Channels["hook"].LastError; (got == "no such host") == changed {
+			t.Fatalf("changed=%v: last error after restart = %q", changed, got)
+		}
+	}
+}
+
+// The watchdog checks in soon after start with the key from secrets.env, the server's
+// name and the email addresses of its channels, and status shows how it went.
+func TestWatchdogChecksInAndStatusShowsIt(t *testing.T) {
+	var mu sync.Mutex
+	var got []map[string]any
+	var auth string
+	relay := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var c map[string]any
+		json.NewDecoder(r.Body).Decode(&c)
+		mu.Lock()
+		got, auth = append(got, c), r.Header.Get("Authorization")
+		mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer relay.Close()
+
+	cfgDir, dataDir := t.TempDir(), t.TempDir()
+	writeFiles(t, cfgDir, map[string]string{
+		"pulse.yaml": "version: 1\nserver_name: test-box\nserver_address: 203.0.113.10\ndefaults:\n  notify: [mail]\n  interval: 1h\n" +
+			"watchdog:\n  key: ${PULSE_BRYNKO_KEY}\n  url: " + relay.URL + "\n",
+		"channels.yaml": "channels:\n  mail:\n    type: smtp\n    host: smtp.example.com\n    from: a@example.com\n" +
+			"    to: [ops@example.com, oncall@example.com]\n",
+		"secrets.env":     "PULSE_BRYNKO_KEY=k3y\n",
+		"monitors/m.yaml": "monitors:\n  - id: mem\n    type: memory\n    alert_when: used_percent > 99\n",
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, Options{ConfigDir: cfgDir, DataDir: dataDir, Platform: platform.Current(), HTTPClient: relay.Client(),
+			Log: slog.New(slog.NewTextHandler(io.Discard, nil)), SkipSecurityCheck: true, Version: "test"})
+	}()
+	waitFor(t, func() bool { mu.Lock(); defer mu.Unlock(); return len(got) >= 1 })
+	waitFor(t, func() bool {
+		snap, _ := store.ReadState(dataDir)
+		return snap != nil && snap.Watchdog != nil && !snap.Watchdog.LastOK.IsZero()
+	})
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	c := got[0]
+	if auth != "Bearer k3y" || c["server"] != "test-box" || c["address"] != "203.0.113.10" || c["version"] != "test" ||
+		len(c["email"].([]any)) != 2 || c["every"] != float64(60) {
+		t.Fatalf("check-in = %v, auth %q", c, auth)
+	}
+	snap, _ := store.ReadState(dataDir)
+	if w := snap.Watchdog; w.LastError != "" || len(w.Email) != 2 {
+		t.Fatalf("watchdog status = %+v", w)
 	}
 }

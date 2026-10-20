@@ -70,6 +70,8 @@ func init() {
 		{name: "silence", section: "Run", summary: "Pause alerts for a while, for example during a deploy",
 			usage:   "silence <monitor-id|all> <duration> [--reason text] | silence list | silence clear <monitor-id|all>",
 			details: silenceDetails, run: cmdSilence},
+		{name: "fix", section: "Run", summary: "Approve or dismiss a fix that self-healing prepared",
+			usage: "fix approve <monitor-id> | fix dismiss <monitor-id> [--id fix-id] [flags]", details: fixDetails, run: cmdFix},
 		{name: "ping", section: "Run", summary: "Record a heartbeat, for jobs that check in",
 			usage: "ping <heartbeat-monitor-id> [flags]", run: cmdPing},
 		{name: "schema", section: "Other", summary: "Print the JSON Schema for the configuration files",

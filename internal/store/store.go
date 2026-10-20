@@ -44,6 +44,32 @@ type MonitorStatus struct {
 
 	SilencedUntil time.Time `json:"silenced_until,omitzero"`
 	SilenceReason string    `json:"silence_reason,omitempty"`
+
+	Heal *HealStatus `json:"heal,omitempty"` // set when the monitor has a heal rule
+}
+
+// HealStatus is what self-healing has done for one monitor, and what waits for approval.
+type HealStatus struct {
+	Mode         string       `json:"mode"`          // ask or auto
+	What         string       `json:"what"`          // the fix in words
+	Attempts     int          `json:"attempts"`      // automatic fixes allowed within the window
+	AttemptsUsed int          `json:"attempts_used"` // automatic fixes within the window
+	Healing      bool         `json:"healing,omitempty"`
+	GaveUp       bool         `json:"gave_up,omitempty"`
+	Waiting      *HealWaiting `json:"waiting,omitempty"`  // a fix prepared and waiting for approval
+	Approved     bool         `json:"approved,omitempty"` // it was approved and starts at the next check
+	Dismissed    bool         `json:"dismissed,omitempty"`
+	LastAt       time.Time    `json:"last_at,omitzero"`
+	LastResult   string       `json:"last_result,omitempty"`
+}
+
+// HealWaiting is a fix waiting for approval. ID names it, so an approval runs
+// only the fix that was prepared for this moment.
+type HealWaiting struct {
+	ID      string    `json:"id"`
+	Since   time.Time `json:"since"`
+	Expires time.Time `json:"expires"`
+	Why     string    `json:"why,omitempty"` // why it waits instead of running by itself
 }
 
 // ChannelStatus is the delivery health of one channel.
@@ -64,7 +90,21 @@ type Snapshot struct {
 	Updated  time.Time                `json:"updated"`
 	Monitors map[string]MonitorStatus `json:"monitors"`
 	Channels map[string]ChannelStatus `json:"channels"`
+	Watchdog *WatchdogStatus          `json:"watchdog,omitempty"` // set when the watchdog is on
 }
+
+// WatchdogStatus is how the last check-ins with the brynko relay went.
+type WatchdogStatus struct {
+	LastOK      time.Time `json:"last_ok,omitzero"`
+	LastError   string    `json:"last_error,omitempty"`
+	LastErrorAt time.Time `json:"last_error_at,omitzero"`
+	Email       []string  `json:"email,omitempty"`    // who the relay alerts
+	WhatsApp    []string  `json:"whatsapp,omitempty"` // by WhatsApp, through brynko relay channels
+	Skipped     []string  `json:"skipped,omitempty"`  // channels it cannot use (not email)
+}
+
+// KindUndelivered is the history kind of an alert a channel could not deliver.
+const KindUndelivered = "undelivered"
 
 // Record is one line of alert history.
 type Record struct {
@@ -76,6 +116,11 @@ type Record struct {
 	Detail   string    `json:"detail"`
 	Channels []string  `json:"channels"`
 	Silenced bool      `json:"silenced,omitempty"` // held back by a silence, sent nowhere
+
+	// For KindUndelivered: the kind and time of the alert that was not delivered, so a
+	// reader can match it to that alert's own record. Detail is the channel's error.
+	AlertKind string    `json:"alert_kind,omitempty"`
+	AlertAt   time.Time `json:"alert_at,omitzero"`
 }
 
 // Store writes to one data folder.

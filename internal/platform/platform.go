@@ -61,6 +61,14 @@ type Platform interface {
 	RunAsService(fn host.ServiceFunc) (bool, error)
 	// StartCommand is how a person starts the installed service by hand, for messages.
 	StartCommand() string
+
+	// RestartService restarts a service for self-healing and returns once the
+	// restart has finished. Whether it then works is for the monitor to say.
+	RestartService(ctx context.Context, name string) error
+	// SetHealRights lets the pulse service restart exactly these services and
+	// no others, replacing what it was allowed before. It needs root or
+	// Administrator rights; an empty list takes the right away.
+	SetHealRights(ctx context.Context, services []string) (host.HealRights, error)
 }
 
 // Current returns the platform this binary was built for.

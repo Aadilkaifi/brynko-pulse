@@ -19,6 +19,7 @@ caught by `pulse validate` instead of being ignored.
 | `limits` | [limits](#limits) |  |  |  |
 | `maintenance` | list of [maintenance](#maintenance) windows |  |  |  |
 | `server_address` | string |  |  | How people reach this server, shown in alerts beside server_name, for example 203.0.113.10 or web-1.example.com. |
+| `watchdog` | [watchdog](#watchdog) |  |  |  |
 
 ### defaults
 
@@ -46,6 +47,7 @@ A monitor that changes state this many times within the window is marked flappin
 |---|---|---|---|---|
 | `command_output_bytes` | integer |  | `65536` | Output kept from a command check. |
 | `max_alerts_per_minute` | integer |  | `10` | Above this, alerts are folded into one summary message. |
+| `max_heals_per_hour` | integer |  | `10` | Self-healing attempts allowed per hour across all monitors on this server. Above this, pulse stops trying and alerts. |
 
 ### api
 
@@ -122,9 +124,10 @@ Local API for tools and a future UI. Never listens on a network port.
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `api_key` | secret `${NAME}` | yes |  |  |
-| `email` | list of email addresses |  |  |  |
-| `whatsapp` | list of phone numbers (+919876543210) |  |  |  |
+| `api_key` | secret `${NAME}` | yes |  | This server's brynko key, as a ${NAME} reference to secrets.env. The app sets it up for you. |
+| `email` | list of email addresses |  |  | Email addresses. |
+| `url` | string |  | `https://cloudagent.brynko.in/api/v1/pulse/alert` | Where the relay takes alerts: an https:// address. Leave it unset. |
+| `whatsapp` | list of phone numbers (+919876543210) |  |  | WhatsApp numbers in international format, for example +919876543210. |
 
 At least one of the delivery lists above is required.
 
@@ -141,6 +144,7 @@ Each file has a `monitors` list. Every monitor has:
 | `cooldown` | duration (30s, 5m, 2h, 1d) |  |  | While the problem lasts, the alert is sent again this often, until it is over. Empty: the server's default (defaults.cooldown). |
 | `enabled` | boolean |  | `true` | Off keeps the monitor in its file but stops checking it. |
 | `for` | duration (30s, 5m, 2h, 1d) |  |  | How long the problem must last before you are alerted, so a short spike does not wake anyone. Empty: the server's default (defaults.for), or at once when it sets none. |
+| `heal` | [heal](#heal) |  |  |  |
 | `interval` | duration (30s, 5m, 2h, 1d) |  |  | How often pulse measures it. Types that follow events (containers, services, files, logs) also notice a change at once; this is the regular check in between. Empty: the server's default (defaults.interval). |
 | `name` | string |  |  | Shown in alerts and lists. Empty: the id. |
 | `notify` | list of channel names |  |  | Channels told about this monitor. Empty: the server's default channels (defaults.notify). |
@@ -252,3 +256,31 @@ Exactly one of `host`, `file`.
 |---|---|---|---|---|
 | `expect_every` | duration (30s, 5m, 2h, 1d) | yes |  | How often the job runs, for example 1d for a nightly job. |
 | `grace` | duration (30s, 5m, 2h, 1d) |  | `1m` | Extra time allowed before it counts as late. |
+
+## Monitor fields with their own section
+
+### heal
+
+Self-healing: what pulse does when this monitor fails. In ask mode pulse prepares the fix and waits for you to approve it; in auto mode it runs the fix by itself. Either way it waits until the problem has lasted the monitor's for (at least 30s), runs the steps in order, and waits verify for the monitor to be OK again.
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `steps` | list of [healStep](#healstep) | yes |  | What to do, in order. pulse stops at the first step that fails. |
+| `attempts` | integer |  | `3` | How many automatic fixes within the window. Fixes you approve are not counted. |
+| `mode` | `off` \| `ask` \| `auto` |  | `ask` | ask: prepare the fix and wait for approval (pulse fix approve, or the app). auto: run it by itself; after 2 automatic fixes that did not help in one problem, or when the tries are used up, the next fix waits for approval. off: keep the rule but do nothing. |
+| `only_if_ok` | list of id |  |  | Monitors that must be OK before a fix. When one of them is failing, it is the likely cause: pulse does not fix this one and says so in the alert. |
+| `timeout` | duration (30s, 5m, 2h, 1d) |  | `90s` | How long all the steps together may take. |
+| `verify` | duration (30s, 5m, 2h, 1d) |  | `2m` | How long to wait after a fix for the monitor to be OK again before counting it as not helping. |
+| `within` | duration (30s, 5m, 2h, 1d) |  | `1h` | The window automatic fixes are counted in. |
+
+### healStep
+
+One step: restart services, restart containers, or run a program.
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `restart_container` | list of string |  |  | Docker containers to restart, in order, by name as docker ps shows it. |
+| `restart_service` | list of string |  |  | Services to restart, in order: on Linux systemd units without .service, on Windows service names. pulse gets the right to restart only these. |
+| `run` | list of string |  |  | A program and its arguments. Never run through a shell; it runs as the pulse service account. |
+
+Each step has exactly one of `restart_service`, `restart_container` or `run`. `ssl`, `file` and `heartbeat` monitors cannot have `heal`. See [self-healing.md](self-healing.md).
