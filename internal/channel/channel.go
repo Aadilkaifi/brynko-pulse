@@ -24,7 +24,6 @@ import (
 	"github.com/Aadilkaifi/brynko-pulse/internal/config"
 )
 
-
 // Sender delivers one alert.
 type Sender interface {
 	Send(ctx context.Context, a alert.Alert) error
