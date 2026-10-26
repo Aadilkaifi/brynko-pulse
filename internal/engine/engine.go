@@ -27,6 +27,11 @@ type Rule struct {
 	For      time.Duration // how long a problem must last before alerting
 	Cooldown time.Duration // how often to repeat while it continues
 	HasClear bool          // recovery requires the clear condition, not just "no longer bad"
+	// Key names the alert and clear conditions. A monitor that started failing under one
+	// rule and is no longer bad under a changed one recovers at once: raising an alert
+	// limit above the reading should end the alert, not wait for an old clear limit.
+	// Empty: not tracked.
+	Key string
 	// Flapping: this many alerts and recoveries within FlapWindow pause alerts
 	// for the monitor until it has been quiet for half the window. 0 turns it off.
 	FlapChanges int
@@ -71,6 +76,7 @@ type State struct {
 	Detail       string      `json:"detail,omitempty"`
 	Changes      []time.Time `json:"changes,omitempty"` // recent alerts and recoveries, for flapping
 	Flapping     bool        `json:"flapping,omitempty"`
+	Rule         string      `json:"rule,omitempty"` // Rule.Key while the problem lasts
 }
 
 // Engine is safe for concurrent use.
@@ -160,6 +166,7 @@ func observe(st *State, id string, r Rule, now time.Time, o Observation) *Event 
 	st.Detail = o.Detail
 
 	if o.Bad {
+		st.Rule = r.Key // still a problem under the current rule: it is the one to recover from
 		switch st.Status {
 		case Unknown, OK:
 			st.Status, st.ProblemSince = Pending, now
@@ -185,7 +192,10 @@ func observe(st *State, id string, r Rule, now time.Time, o Observation) *Event 
 
 	switch st.Status {
 	case Firing:
-		if r.HasClear && !o.Clear {
+		if st.Rule == "" {
+			st.Rule = r.Key // state saved by an older pulse: judged by the rule it has now
+		}
+		if r.HasClear && !o.Clear && st.Rule == r.Key {
 			return nil // between the alert and clear thresholds: still a problem
 		}
 		ev := &Event{Kind: EventResolved, Monitor: id, Detail: o.Detail, Since: st.ProblemSince, At: now,

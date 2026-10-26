@@ -177,7 +177,8 @@
       "type": "object",
       "properties": {
         "key": { "$ref": "#/$defs/envRef", "description": "This server's relay key, as a ${NAME} reference to secrets.env." },
-        "notify": { "$ref": "#/$defs/notifyList", "description": "Email channels whose addresses the relay alerts. Other channel types are skipped: their addresses hold secrets that never leave the server. Empty: the server's default channels (defaults.notify)." },
+        "notify": { "$ref": "#/$defs/notifyList", "description": "The brynko relay channels to alert. Empty: every brynko relay channel. The relay sends this alert itself (the server is silent), so other channels are skipped." },
+        "media": { "type": "array", "items": { "enum": ["email", "whatsapp"] }, "minItems": 1, "uniqueItems": true, "description": "How the relay alerts those channels: email, whatsapp, or both. Leave it unset for both. With no address left for the media chosen, the relay emails the account that turned the alert on." },
         "url": { "type": "string", "pattern": "^https://", "maxLength": 300, "default": "https://cloudagent.brynko.in/api/v1/pulse/checkin", "description": "Where to check in: an https:// address. Leave it unset for the brynko relay." }
       },
       "required": ["key"],

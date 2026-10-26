@@ -5,9 +5,9 @@ package config
 
 import (
 	"encoding/json"
-	"time"
-
 	"github.com/Aadilkaifi/brynko-pulse/internal/duration"
+	"sort"
+	"time"
 )
 
 // Config is the validated, merged configuration.
@@ -73,9 +73,27 @@ const DefaultWatchdogURL = "https://cloudagent.brynko.in/api/v1/pulse/checkin"
 // Watchdog has pulse check in with the brynko relay every minute, so the relay
 // can alert when the server goes silent. Off unless set.
 type Watchdog struct {
-	Key    string   `json:"key"`              // ${NAME} reference to the relay key
-	Notify []string `json:"notify,omitempty"` // email channels to alert; empty: defaults.notify
-	URL    string   `json:"url,omitempty"`
+	Key string `json:"key"` // ${NAME} reference to the relay key
+	// Notify limits the alert to these brynko relay channels; empty: every brynko relay
+	// channel. The relay sends the alert, so only its own channels can carry it.
+	Notify []string `json:"notify,omitempty"`
+	// Media is how the relay tells them: "email", "whatsapp". Empty: both. Someone who wants
+	// the alert by email only keeps WhatsApp numbers on the channel for other alerts.
+	Media []string `json:"media,omitempty"`
+	URL   string   `json:"url,omitempty"`
+}
+
+// Sends reports whether the watchdog alerts by this medium ("email" or "whatsapp").
+func (w Watchdog) Sends(medium string) bool {
+	if len(w.Media) == 0 {
+		return true
+	}
+	for _, m := range w.Media {
+		if m == medium {
+			return true
+		}
+	}
+	return false
 }
 
 // Endpoint is where pulse checks in.
@@ -86,17 +104,18 @@ func (w Watchdog) Endpoint() string {
 	return DefaultWatchdogURL
 }
 
-// WatchdogRecipients returns who the relay alerts, from the channels the
-// watchdog names (or the default channels): the addresses of email channels,
-// and the email addresses and WhatsApp numbers of brynko relay channels. Other
-// channels are skipped, because their addresses hold secrets.
+// WatchdogRecipients returns who the relay alerts: the email addresses and
+// WhatsApp numbers of the brynko relay channels the watchdog names, or of every
+// brynko relay channel when it names none. The relay sends this alert itself (the
+// server is silent), so it goes through the relay's own channels only; any other
+// channel named is skipped.
 func (c *Config) WatchdogRecipients() (emails, whatsapp, skipped []string) {
 	if c.Watchdog == nil {
 		return nil, nil, nil
 	}
 	ids := c.Watchdog.Notify
 	if len(ids) == 0 {
-		ids = c.Defaults.Notify
+		ids = c.RelayChannels()
 	}
 	seen := map[string]bool{}
 	add := func(list *[]string, items []string) {
@@ -110,8 +129,6 @@ func (c *Config) WatchdogRecipients() (emails, whatsapp, skipped []string) {
 	for _, id := range ids {
 		ch, ok := c.Channels[id]
 		switch {
-		case ok && ch.Type == "smtp":
-			add(&emails, ch.To)
 		case ok && ch.Type == "brynko":
 			add(&emails, ch.Email)
 			add(&whatsapp, ch.WhatsApp)
@@ -119,7 +136,27 @@ func (c *Config) WatchdogRecipients() (emails, whatsapp, skipped []string) {
 			skipped = append(skipped, id)
 		}
 	}
+	// Only the media chosen. With none of them left the relay emails the account, so the
+	// alert is never lost; the app says so where the media are chosen.
+	if !c.Watchdog.Sends("email") {
+		emails = nil
+	}
+	if !c.Watchdog.Sends("whatsapp") {
+		whatsapp = nil
+	}
 	return emails, whatsapp, skipped
+}
+
+// RelayChannels lists the brynko relay channels by name, sorted.
+func (c *Config) RelayChannels() []string {
+	var ids []string
+	for id, ch := range c.Channels {
+		if ch.Type == "brynko" {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 // Limits bound how much pulse sends and keeps.

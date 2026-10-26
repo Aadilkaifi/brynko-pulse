@@ -274,6 +274,15 @@ func (g *generation) stop() {
 	g.disp.Stop(stopTimeout)
 }
 
+// ruleKey names a monitor's conditions, so the engine notices when they change.
+func ruleKey(alertC, clearC *rule.Condition) string {
+	k := alertC.Raw
+	if clearC != nil {
+		k += " | " + clearC.Raw
+	}
+	return k
+}
+
 func conditions(m config.Monitor, defaultAlert string) (alertC, clearC *rule.Condition, err error) {
 	src := m.AlertWhen
 	if src == "" {
@@ -370,7 +379,7 @@ func (r *runner) checkOnce(ctx context.Context, g *generation, m config.Monitor,
 	now := time.Now()
 	changes, window := g.cfg.Defaults.FlapLimits()
 	ev := r.eng.Observe(m.ID, engine.Rule{For: m.For.D(), Cooldown: m.Cooldown.D(), HasClear: clearC != nil,
-		FlapChanges: changes, FlapWindow: window}, now, obs)
+		Key: ruleKey(alertC, clearC), FlapChanges: changes, FlapWindow: window}, now, obs)
 
 	g.mu.Lock()
 	ms := g.status[m.ID]

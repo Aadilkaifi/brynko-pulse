@@ -80,6 +80,48 @@ func TestHysteresisHoldsUntilClear(t *testing.T) {
 	})
 }
 
+func TestAChangedRuleIsJudgedByTheNewOne(t *testing.T) {
+	// alert > 85, clear < 80, failing at 87; the alert limit is raised to 98 (clear_when left at 80).
+	// 87 is not a problem under the new rule: it recovers now, not when it drops below 80.
+	e := New(nil)
+	old := Rule{HasClear: true, Cooldown: time.Hour, Key: "used_percent > 85 | used_percent < 80"}
+	if ev := e.Observe("m", old, t0, Observation{Bad: true}); ev == nil || ev.Kind != EventFiring {
+		t.Fatalf("first: %+v", ev)
+	}
+	if ev := e.Observe("m", old, t0.Add(time.Minute), Observation{}); ev != nil {
+		t.Fatalf("same rule, between the limits: held, got %+v", ev)
+	}
+	raised := Rule{HasClear: true, Cooldown: time.Hour, Key: "used_percent > 98 | used_percent < 80"}
+	ev := e.Observe("m", raised, t0.Add(2*time.Minute), Observation{})
+	if ev == nil || ev.Kind != EventResolved {
+		t.Fatalf("changed rule, not bad under it: want resolved, got %+v", ev)
+	}
+	if st := e.Snapshot()["m"]; st.Status != OK || st.Rule != "" {
+		t.Fatalf("state after: %+v", st)
+	}
+}
+
+func TestAChangedRuleThatStillFailsKeepsFailing(t *testing.T) {
+	e := New(nil)
+	r := Rule{HasClear: true, Cooldown: time.Hour, Key: "a > 85 | a < 80"}
+	e.Observe("m", r, t0, Observation{Bad: true})
+	r2 := Rule{HasClear: true, Cooldown: time.Hour, Key: "a > 90 | a < 80"}
+	if ev := e.Observe("m", r2, t0.Add(time.Minute), Observation{Bad: true}); ev != nil {
+		t.Fatalf("still bad: no new alert inside the cooldown, got %+v", ev)
+	}
+	if ev := e.Observe("m", r2, t0.Add(2*time.Minute), Observation{}); ev != nil {
+		t.Fatalf("the new rule is now the one it fails under: held between its limits, got %+v", ev)
+	}
+}
+
+func TestStateFromAnOlderPulseKeepsItsHysteresis(t *testing.T) {
+	e := New(map[string]State{"m": {Status: Firing, ProblemSince: t0, LastNotified: t0}})
+	r := Rule{HasClear: true, Cooldown: time.Hour, Key: "a > 98 | a < 80"}
+	if ev := e.Observe("m", r, t0.Add(time.Minute), Observation{}); ev != nil {
+		t.Fatalf("no rule recorded: judged by the current one, held, got %+v", ev)
+	}
+}
+
 func TestResolvedDurationAndSince(t *testing.T) {
 	e := New(nil)
 	r := Rule{For: time.Minute, Cooldown: time.Hour}
