@@ -109,12 +109,14 @@ func TestValidate(t *testing.T) {
 		{name: "watchdog with the default channels", files: base(map[string]string{PulseFile: validPulse + "watchdog:\n  key: ${PULSE_BRYNKO_KEY}\n"})},
 		{name: "watchdog key is a secret reference", files: base(map[string]string{PulseFile: validPulse + "watchdog:\n  key: abc123\n"}), wantErr: "Secrets are never written here"},
 		{name: "watchdog names a real channel", files: base(map[string]string{PulseFile: validPulse + "watchdog:\n  key: ${K}\n  notify: [pager]\n"}), wantErr: `channel "pager" is not defined`},
-		{name: "watchdog emails only", files: base(map[string]string{
+		{name: "watchdog goes through relay channels only", files: base(map[string]string{
 			PulseFile:    validPulse + "watchdog:\n  key: ${K}\n  notify: [mail, tg]\n",
 			ChannelsFile: validChannels + "  tg:\n    type: telegram\n    bot_token: ${PULSE_TEST_PASSWORD}\n    chat_id: \"1\"\n"}),
-			wantWarn: "the watchdog alerts email and brynko relay channels only: tg will not be told"},
-		{name: "watchdog with nobody to email", files: base(map[string]string{PulseFile: "version: 1\nserver_name: web-1\nwatchdog:\n  key: ${K}\n"}),
-			wantWarn: "the watchdog names no address, so the brynko relay emails the account"},
+			wantWarn: "the dead-server alert goes through brynko relay channels only: mail, tg will not be told"},
+		{name: "watchdog with nobody to tell", files: base(map[string]string{PulseFile: "version: 1\nserver_name: web-1\nwatchdog:\n  key: ${K}\n"}),
+			wantWarn: "no brynko relay channel has an email address or WhatsApp number, so the brynko relay emails the account"},
+		{name: "watchdog by email only", files: base(map[string]string{PulseFile: validPulse + "watchdog:\n  key: ${K}\n  media: [email]\n"})},
+		{name: "watchdog media are email or whatsapp", files: base(map[string]string{PulseFile: validPulse + "watchdog:\n  key: ${K}\n  media: [sms]\n"}), wantErr: "must be one of"},
 		{name: "watchdog url is https", files: base(map[string]string{PulseFile: validPulse + "watchdog:\n  key: ${K}\n  url: http://relay.example.com\n"}), wantErr: "an https:// address"},
 		{name: "heal attempts are bounded", files: base(map[string]string{"monitors/x.yaml": "monitors:\n  - id: web\n    type: service\n    service: nginx\n    heal:\n      steps:\n        - restart_service: [nginx]\n      attempts: 50\n"}), wantErr: "maximum"},
 		{name: "heal unknown field", files: base(map[string]string{"monitors/x.yaml": "monitors:\n  - id: web\n    type: service\n    service: nginx\n    heal:\n      action: restart\n      steps:\n        - restart_service: [nginx]\n"}), wantErr: "unknown field: action"},

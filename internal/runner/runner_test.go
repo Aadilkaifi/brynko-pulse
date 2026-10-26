@@ -308,10 +308,11 @@ func TestWatchdogChecksInAndStatusShowsIt(t *testing.T) {
 
 	cfgDir, dataDir := t.TempDir(), t.TempDir()
 	writeFiles(t, cfgDir, map[string]string{
-		"pulse.yaml": "version: 1\nserver_name: test-box\nserver_address: 203.0.113.10\ndefaults:\n  notify: [mail]\n  interval: 1h\n" +
+		"pulse.yaml": "version: 1\nserver_name: test-box\nserver_address: 203.0.113.10\ndefaults:\n  notify: [team]\n  interval: 1h\n" +
 			"watchdog:\n  key: ${PULSE_BRYNKO_KEY}\n  url: " + relay.URL + "\n",
-		"channels.yaml": "channels:\n  mail:\n    type: smtp\n    host: smtp.example.com\n    from: a@example.com\n" +
-			"    to: [ops@example.com, oncall@example.com]\n",
+		// The dead-server alert goes through brynko relay channels (every one, when it names none).
+		"channels.yaml": "channels:\n  team:\n    type: brynko\n    api_key: ${PULSE_BRYNKO_KEY}\n" +
+			"    email: [ops@example.com, oncall@example.com]\n",
 		"secrets.env":     "PULSE_BRYNKO_KEY=k3y\n",
 		"monitors/m.yaml": "monitors:\n  - id: mem\n    type: memory\n    alert_when: used_percent > 99\n",
 	})

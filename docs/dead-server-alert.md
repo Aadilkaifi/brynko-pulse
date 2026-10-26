@@ -29,16 +29,20 @@ sudo pulse secret set PULSE_BRYNKO_KEY
 # /etc/brynko-pulse/pulse.yaml
 watchdog:
   key: ${PULSE_BRYNKO_KEY}
-  notify: [ops-email]       # optional: the email channels to alert; empty means defaults.notify
+  media: [email]            # optional: email, whatsapp, or both (the default)
+  notify: [ops-relay]       # optional: only these brynko relay channels; empty means every one
 ```
 
 | Setting | Notes |
 |---|---|
 | `key` | This server's relay key, as a `${NAME}` reference to `secrets.env` |
-| `notify` | Channels to alert: email channels (their `to` addresses) and [brynko relay](channels.md#brynko) channels (their email addresses and WhatsApp numbers). Other channels are skipped: Telegram, Slack, WhatsApp and webhook addresses hold secrets that never leave the server. Empty: the server's default channels. With no address at all, the relay emails the brynko account that turned the alert on |
+| `media` | How the relay tells them: `email`, `whatsapp`, or both (leave it unset). For the dead-server alert by email only, while the channel's WhatsApp numbers keep getting the other alerts. With no address left for the media chosen, the relay emails the brynko account that turned the alert on |
+| `notify` | Rarely needed. The [brynko relay](channels.md#brynko) channels to alert (their email addresses and WhatsApp numbers); empty means every brynko relay channel on the server. The relay sends this alert itself, because the server is silent, so it goes through its own channels only: any other channel named is skipped. With no address at all, the relay emails the brynko account that turned the alert on |
 | `url` | Where to check in. Leave it unset |
 
-`pulse validate` warns when a named channel is not email, and when no email address is named.
+`pulse validate` warns when a named channel is not a brynko relay channel, and when no relay channel has an address.
+
+Before pulse 0.2.1 the alert also used email channels and, when `notify` was empty, the server's default channels.
 
 ## What the relay receives
 

@@ -313,36 +313,40 @@ const reservedID = "all"
 
 var envRef = regexp.MustCompile(`^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$`)
 
-// checkWatchdog checks that the watchdog's channels exist and that the relay has
-// someone to email: it can only email, since other channels' addresses hold secrets.
-func checkWatchdog(d document, w map[string]any, defaultNotify []any, channels map[string]bool, emailTo map[string]int, r *Result) {
+// checkWatchdog checks that the channels the watchdog names exist and are brynko
+// relay channels (the relay sends this alert itself), and that the relay has
+// someone to tell. Naming none means every brynko relay channel.
+func checkWatchdog(d document, w map[string]any, channels map[string]bool, relayTo map[string]int, r *Result) {
 	ids, own := w["notify"].([]any)
 	if !own {
-		ids = defaultNotify
+		ids = nil
+		for id := range relayTo {
+			ids = append(ids, id)
+		}
 	}
 	addresses := 0
 	var skipped []string
 	for i, v := range ids {
 		id := v.(string)
+		count, relay := relayTo[id]
 		switch {
-		case !channels[id] && own:
+		case !channels[id]:
 			r.Errors = append(r.Errors, issueAt(d, []string{"watchdog", "notify", fmt.Sprint(i)},
 				fmt.Sprintf("channel %q is not defined in %s", id, ChannelsFile)))
-		case !channels[id]:
-			// reported under defaults.notify
-		case emailTo[id] == 0:
+		case !relay:
 			skipped = append(skipped, id)
 		default:
-			addresses += emailTo[id]
+			addresses += count
 		}
 	}
 	if len(skipped) > 0 {
+		sort.Strings(skipped)
 		r.Warnings = append(r.Warnings, issueAt(d, []string{"watchdog"}, fmt.Sprintf(
-			"the watchdog alerts email and brynko relay channels only: %s will not be told when this server goes silent", strings.Join(skipped, ", "))))
+			"the dead-server alert goes through brynko relay channels only: %s will not be told when this server goes silent", strings.Join(skipped, ", "))))
 	}
 	if addresses == 0 {
 		r.Warnings = append(r.Warnings, issueAt(d, []string{"watchdog"},
-			"the watchdog names no address, so the brynko relay emails the account that turned the alert on; name an email or brynko relay channel in watchdog.notify or defaults.notify to choose who it alerts"))
+			"no brynko relay channel has an email address or WhatsApp number, so the brynko relay emails the account that turned the alert on; add one to a brynko relay channel to choose who it alerts"))
 	}
 }
 
@@ -350,7 +354,7 @@ func checkWatchdog(d document, w map[string]any, defaultNotify []any, channels m
 // matches the schema, so type assertions below are safe.
 func crossCheck(docs []document, secrets Secrets, r *Result) {
 	channels := map[string]bool{}
-	emailTo := map[string]int{} // email or brynko relay channel -> how many addresses and numbers
+	relayTo := map[string]int{} // brynko relay channel -> how many addresses and numbers
 	var defaultNotify []any
 	var watchdog map[string]any
 	var pulseDoc document
@@ -360,14 +364,10 @@ func crossCheck(docs []document, secrets Secrets, r *Result) {
 		case kindChannels:
 			for id, ch := range m["channels"].(map[string]any) {
 				channels[id] = true
-				switch c, _ := ch.(map[string]any); c["type"] {
-				case "smtp":
-					to, _ := c["to"].([]any)
-					emailTo[id] = len(to)
-				case "brynko":
+				if c, _ := ch.(map[string]any); c["type"] == "brynko" {
 					email, _ := c["email"].([]any)
 					phones, _ := c["whatsapp"].([]any)
-					emailTo[id] = len(email) + len(phones)
+					relayTo[id] = len(email) + len(phones)
 				}
 			}
 		case kindPulse:
@@ -387,7 +387,7 @@ func crossCheck(docs []document, secrets Secrets, r *Result) {
 	}
 
 	if watchdog != nil {
-		checkWatchdog(pulseDoc, watchdog, defaultNotify, channels, emailTo, r)
+		checkWatchdog(pulseDoc, watchdog, channels, relayTo, r)
 	}
 
 	monitorIDs := map[string]string{}
