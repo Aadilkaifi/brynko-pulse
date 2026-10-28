@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -66,7 +67,19 @@ var (
 	kernel32                 = windows.NewLazySystemDLL("kernel32.dll")
 	procGlobalMemoryStatusEx = kernel32.NewProc("GlobalMemoryStatusEx")
 	procGetSystemTimes       = kernel32.NewProc("GetSystemTimes")
+	procGetTickCount64       = kernel32.NewProc("GetTickCount64")
 )
+
+// Uptime is GetTickCount64: milliseconds since Windows started, which never wraps.
+// A shutdown with Fast Startup (Windows desktops, not Server) resumes the kernel
+// rather than starting it, so the count carries on; a restart always resets it.
+func (Platform) Uptime() (time.Duration, error) {
+	if err := procGetTickCount64.Find(); err != nil {
+		return 0, err
+	}
+	ms, _, _ := procGetTickCount64.Call()
+	return time.Duration(ms) * time.Millisecond, nil
+}
 
 type memoryStatusEx struct {
 	Length               uint32

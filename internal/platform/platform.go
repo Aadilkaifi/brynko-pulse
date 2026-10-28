@@ -9,6 +9,7 @@ import (
 	"context"
 	"log/slog"
 	"os/exec"
+	"time"
 
 	"github.com/Aadilkaifi/brynko-pulse/internal/platform/host"
 )
@@ -25,6 +26,9 @@ type Platform interface {
 	Memory() (host.Memory, error)
 	CPUTimes() (host.CPUTimes, error)
 	LoadAverage() (host.Load, error)
+	// Uptime is how long the machine has run since it last started. With pulse's
+	// own running time it tells the relay whether a silent server rebooted.
+	Uptime() (time.Duration, error)
 	Service(ctx context.Context, name string) (host.Service, error)
 	ProcessCount(match string) (int, error)
 	// Inventory lists running services and listening ports, for pulse discover.

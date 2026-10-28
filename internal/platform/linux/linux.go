@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/Aadilkaifi/brynko-pulse/internal/platform/host"
 )
@@ -110,6 +111,15 @@ func (Platform) CPUTimes() (host.CPUTimes, error) {
 		}
 	}
 	return t, nil
+}
+
+// Uptime reads /proc/uptime.
+func (Platform) Uptime() (time.Duration, error) {
+	data, err := os.ReadFile("/proc/uptime")
+	if err != nil {
+		return 0, err
+	}
+	return host.ParseUptime(string(data))
 }
 
 // LoadAverage reads /proc/loadavg.

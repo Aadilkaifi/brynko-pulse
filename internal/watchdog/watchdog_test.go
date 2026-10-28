@@ -23,7 +23,7 @@ func TestSendChecksInWithTheKeyAndOnlyWhatIsNeeded(t *testing.T) {
 	}))
 	defer srv.Close()
 	err := Send(context.Background(), srv.Client(), srv.URL, "k3y", Checkin{Server: "web-1", Address: "203.0.113.10",
-		Version: "1.2.3", Email: []string{"ops@example.com"}, Every: 60})
+		Version: "1.2.3", Email: []string{"ops@example.com"}, Every: 60, Up: 3600, HostUp: 86400})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,8 +34,17 @@ func TestSendChecksInWithTheKeyAndOnlyWhatIsNeeded(t *testing.T) {
 	for k := range got {
 		keys = append(keys, k)
 	}
-	if len(got) != 6 || got["server"] != "web-1" || got["every"] != float64(60) || got["goodbye"] != nil {
-		t.Fatalf("body = %v (keys %v): only the server, its address, the version, who to tell and the interval", got, keys)
+	if len(got) != 8 || got["server"] != "web-1" || got["every"] != float64(60) || got["up"] != float64(3600) ||
+		got["host_up"] != float64(86400) || got["goodbye"] != nil {
+		t.Fatalf("body = %v (keys %v): only the server, its address, the version, who to tell, the interval and the running times", got, keys)
+	}
+	// A system that cannot say how long it has run sends no host_up at all.
+	got = nil
+	if err := Send(context.Background(), srv.Client(), srv.URL, "k3y", Checkin{Server: "web-1", Version: "1", Up: 5}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got["host_up"]; ok {
+		t.Fatalf("host_up sent while unknown: %v", got)
 	}
 }
 

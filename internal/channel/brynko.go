@@ -18,7 +18,7 @@ import (
 )
 
 // DefaultRelayURL is where the brynko relay takes alerts.
-const DefaultRelayURL = "https://cloudagent.brynko.in/api/v1/pulse/alert"
+const DefaultRelayURL = "https://devops.brynko.in/api/v1/pulse/alert"
 
 // Errors the relay answers with, worded for status and logs.
 var (

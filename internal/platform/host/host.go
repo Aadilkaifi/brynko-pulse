@@ -4,7 +4,13 @@
 // Package host defines the measurements every platform provides.
 package host
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+	"strconv"
+	"strings"
+	"time"
+)
 
 // ErrUnsupported means the measurement does not exist on this operating system.
 var ErrUnsupported = errors.New("not available on this operating system")
@@ -40,6 +46,20 @@ type CPUTimes struct {
 type Load struct {
 	Load1, Load5, Load15 float64
 	CPUs                 int
+}
+
+// ParseUptime reads the first field of Linux's /proc/uptime: seconds since the
+// kernel started. Kept here, free of build tags, so it is tested on every system.
+func ParseUptime(text string) (time.Duration, error) {
+	f := strings.Fields(text)
+	if len(f) == 0 {
+		return 0, errors.New("unexpected /proc/uptime format")
+	}
+	s, err := strconv.ParseFloat(f[0], 64)
+	if err != nil || s < 0 {
+		return 0, fmt.Errorf("parse /proc/uptime: %q", f[0])
+	}
+	return time.Duration(s * float64(time.Second)), nil
 }
 
 // Service is the state of a system service.

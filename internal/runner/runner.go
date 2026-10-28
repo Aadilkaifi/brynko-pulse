@@ -541,7 +541,11 @@ func (r *runner) runWatchdog(ctx context.Context) {
 		cfg := g.cfg
 		emails, phones, skipped := cfg.WatchdogRecipients()
 		c := watchdog.Checkin{Server: cfg.ServerName, Address: cfg.ServerAddress, Version: r.o.Version,
-			Email: emails, WhatsApp: phones, Every: int(watchdog.Every / time.Second)}
+			Email: emails, WhatsApp: phones, Every: int(watchdog.Every / time.Second),
+			Up: int64(time.Since(r.started) / time.Second)}
+		if up, err := r.o.Platform.Uptime(); err == nil {
+			c.HostUp = int64(up / time.Second)
+		}
 		if c.Email == nil {
 			c.Email = []string{}
 		}
