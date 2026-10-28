@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os/exec"
+	"time"
 
 	"github.com/Aadilkaifi/brynko-pulse/internal/platform/host"
 )
@@ -29,6 +30,7 @@ func (unsupported) DiskUsage(string) (host.Disk, error) { return host.Disk{}, er
 func (unsupported) Memory() (host.Memory, error)        { return host.Memory{}, errOS }
 func (unsupported) CPUTimes() (host.CPUTimes, error)    { return host.CPUTimes{}, errOS }
 func (unsupported) LoadAverage() (host.Load, error)     { return host.Load{}, errOS }
+func (unsupported) Uptime() (time.Duration, error)      { return 0, errOS }
 func (unsupported) ProcessCount(string) (int, error)    { return 0, errOS }
 func (unsupported) CheckConfigSecure(string) error      { return nil }
 func (unsupported) SecureConfig(string) error           { return nil }

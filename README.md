@@ -5,7 +5,7 @@ Open-source monitoring and alerts for Linux and Windows servers, developed by
 seconds when something breaks, through the channels you choose: email,
 WhatsApp (your own Meta account), Telegram, Slack or any webhook.
 
-> **Status: first public release (v0.1).** In daily use on our own Linux and Windows servers. Expect
+> **Status: v0.2.** In daily use on our own Linux and Windows servers. Expect
 > rough edges, and please report what you find.
 
 ## Why
@@ -60,7 +60,7 @@ desktop app gives you one place for all of them:
   changes only after you approve each one.
 
 The same app also works with your containers, databases, files and deploy scripts.
-[Download brynko devOps Agent](https://cloudagent.brynko.in/download) and see
+[Download brynko devOps Agent](https://devops.brynko.in/download) and see
 [Using pulse from an app](docs/ui.md).
 
 ## Documentation

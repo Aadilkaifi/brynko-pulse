@@ -179,7 +179,7 @@
         "key": { "$ref": "#/$defs/envRef", "description": "This server's relay key, as a ${NAME} reference to secrets.env." },
         "notify": { "$ref": "#/$defs/notifyList", "description": "The brynko relay channels to alert. Empty: every brynko relay channel. The relay sends this alert itself (the server is silent), so other channels are skipped." },
         "media": { "type": "array", "items": { "enum": ["email", "whatsapp"] }, "minItems": 1, "uniqueItems": true, "description": "How the relay alerts those channels: email, whatsapp, or both. Leave it unset for both. With no address left for the media chosen, the relay emails the account that turned the alert on." },
-        "url": { "type": "string", "pattern": "^https://", "maxLength": 300, "default": "https://cloudagent.brynko.in/api/v1/pulse/checkin", "description": "Where to check in: an https:// address. Leave it unset for the brynko relay." }
+        "url": { "type": "string", "pattern": "^https://", "maxLength": 300, "default": "https://devops.brynko.in/api/v1/pulse/checkin", "description": "Where to check in: an https:// address. Leave it unset for the brynko relay." }
       },
       "required": ["key"],
       "additionalProperties": false
@@ -261,7 +261,7 @@
               "api_key": { "$ref": "#/$defs/envRef", "description": "This server's brynko key, as a ${NAME} reference to secrets.env. The app sets it up for you." },
               "whatsapp": { "$ref": "#/$defs/phoneList", "description": "WhatsApp numbers in international format, for example +919876543210." },
               "email": { "$ref": "#/$defs/emailList", "description": "Email addresses." },
-              "url": { "type": "string", "pattern": "^https://", "maxLength": 300, "default": "https://cloudagent.brynko.in/api/v1/pulse/alert", "description": "Where the relay takes alerts: an https:// address. Leave it unset." }
+              "url": { "type": "string", "pattern": "^https://", "maxLength": 300, "default": "https://devops.brynko.in/api/v1/pulse/alert", "description": "Where the relay takes alerts: an https:// address. Leave it unset." }
             },
             "required": ["api_key"],
             "anyOf": [

@@ -68,7 +68,7 @@ type Maintenance struct {
 }
 
 // DefaultWatchdogURL is the brynko relay's check-in address.
-const DefaultWatchdogURL = "https://cloudagent.brynko.in/api/v1/pulse/checkin"
+const DefaultWatchdogURL = "https://devops.brynko.in/api/v1/pulse/checkin"
 
 // Watchdog has pulse check in with the brynko relay every minute, so the relay
 // can alert when the server goes silent. Off unless set.

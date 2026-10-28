@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCurrent(t *testing.T) {
@@ -44,6 +45,10 @@ func TestSystemMetrics(t *testing.T) {
 	}
 	if _, err := p.ProcessCount("no-such-process-xyz"); err != nil {
 		t.Fatalf("ProcessCount: %v", err)
+	}
+	// The machine started before this test did, and not more than ten years ago.
+	if up, err := p.Uptime(); err != nil || up <= 0 || up > 10*365*24*time.Hour {
+		t.Fatalf("Uptime = %v, %v", up, err)
 	}
 }
 

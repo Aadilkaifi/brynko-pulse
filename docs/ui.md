@@ -3,7 +3,7 @@
 pulse is a command-line program with plain configuration files, and everything on this site works
 without any other software. If you would rather click than edit YAML, the **brynko devOps Agent**
 desktop app gives pulse a full interface. It is a separate program from brynko; download it from
-[cloudagent.brynko.in/download](https://cloudagent.brynko.in/download).
+[devops.brynko.in/download](https://devops.brynko.in/download).
 
 The app is optional. pulse runs on the server by itself, keeps watching when the app is closed, and
 sends its alerts directly. The app only reads and changes pulse's configuration, the same way you

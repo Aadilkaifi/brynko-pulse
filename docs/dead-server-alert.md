@@ -46,9 +46,25 @@ Before pulse 0.2.1 the alert also used email channels and, when `notify` was emp
 
 ## What the relay receives
 
-Every minute: the server's name and address, pulse's version, the email addresses and WhatsApp numbers to alert, and how
-long until the next check-in. Nothing about your monitors, their values or your alerts. pulse sends
-nothing at all unless `watchdog` is set.
+Every minute: the server's name and address, pulse's version, how long pulse and the server have
+been running, the email addresses and WhatsApp numbers to alert, and how long until the next
+check-in. Nothing about your monitors, their values or your alerts. pulse sends nothing at all
+unless `watchdog` is set.
+
+While a server is silent the relay cannot know why: from outside, a server that is off, one that
+lost its network and one whose pulse stopped look the same. When it checks in again, the two running
+times let the "back" email say which it was:
+
+- **The server started again**: it was switched off or restarted, at the time given.
+- **pulse started again, the server stayed up**: pulse was stopped or restarted.
+- **pulse kept running**: the server stayed up and could not reach the relay, most likely because
+  its internet connection dropped.
+
+Both times are durations, not clock times, so a server with a wrong clock gets the right answer.
+On a Windows desktop with Fast Startup, a shutdown resumes rather than restarts Windows, so it reads
+as "pulse started again"; Windows Server and a restart are not affected.
+
+From pulse 0.2.2. With an older pulse the email only says how long the server was silent.
 
 ## Planned stops
 

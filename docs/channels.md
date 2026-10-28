@@ -125,7 +125,7 @@ Monitoring page. The app gets this server's key from your account and stores it 
 
 By hand:
 
-1. Create a brynko account at [cloudagent.brynko.in](https://cloudagent.brynko.in) and add credits.
+1. Create a brynko account at [devops.brynko.in](https://devops.brynko.in) and add credits.
 2. Get this server's key from your account and keep it in `secrets.env`, for example
    `PULSE_BRYNKO_KEY=...` (the [dead-server alert](dead-server-alert.md) uses the same key).
 3. Add the channel:
