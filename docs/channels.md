@@ -47,6 +47,16 @@ Email through any mail server, including Gmail, Outlook and Amazon SES.
 | `username`, `password` | Most providers need an app password, not your account password |
 | `from`, `to` | `to` is a list |
 
+To check an email channel without mailing anyone, add `--check`: pulse connects, logs in and has the
+server accept the sender and every recipient, then hangs up before any message.
+
+```sh
+sudo pulse test channel ops-email --check
+```
+
+It catches a wrong host, port, password or sender, and an address the server refuses outright. Some
+servers accept any address at that point and bounce it later; only a real test alert proves those.
+
 ## `whatsapp`
 
 WhatsApp through your own Meta WhatsApp Cloud API account. You pay Meta's message prices; pulse

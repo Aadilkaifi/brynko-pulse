@@ -205,10 +205,14 @@ Send a test alert, or run one monitor once.
 Usage:
   pulse test channel <name> | test monitor <id> [flags]
 
-  pulse test channel <name>   sends a test alert through one channel
-  pulse test monitor <id>     runs one monitor once and shows what it measures
+  pulse test channel <name>           sends a test alert through one channel
+  pulse test channel <name> --check   checks an email channel without sending anything: connects,
+                                      logs in and has the server accept every recipient
+  pulse test monitor <id>             runs one monitor once and shows what it measures
 
 Flags:
+  -check
+    	channel: check it would deliver without sending anything (email only)
   -config string
     	configuration directory (default "/etc/brynko-pulse")
   -data string

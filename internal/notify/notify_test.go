@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Aadilkaifi/brynko-pulse/internal/alert"
+	"github.com/Aadilkaifi/brynko-pulse/internal/channel"
 	"github.com/Aadilkaifi/brynko-pulse/internal/config"
 	"github.com/Aadilkaifi/brynko-pulse/internal/store"
 )
@@ -194,6 +195,18 @@ func TestReloadKeepsStatusOfUnchangedChannels(t *testing.T) {
 	other.KeepStatus(prev)
 	if other.Status()["mail"].LastError != "" {
 		t.Fatalf("changed secrets must start fresh: %+v", other.Status())
+	}
+}
+
+// Only a channel that can check without sending is checked; the rest say so, and an unknown one is named.
+func TestCheckNowOnlyChecksWhatCanBeCheckedWithoutSending(t *testing.T) {
+	d := New(&config.Config{Limits: config.Limits{MaxAlertsPerMinute: 5}, Channels: map[string]config.Channel{
+		"hook": {Type: "webhook", URL: "https://example.invalid/a"}}}, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err := d.CheckNow(context.Background(), "hook"); !errors.Is(err, channel.ErrCannotCheck) {
+		t.Fatalf("webhook: err = %v", err)
+	}
+	if err := d.CheckNow(context.Background(), "nope"); err == nil || !strings.Contains(err.Error(), "no channel named nope") {
+		t.Fatalf("unknown: err = %v", err)
 	}
 }
 

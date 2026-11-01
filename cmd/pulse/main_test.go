@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -135,5 +136,27 @@ func TestTestMonitorAndChannel(t *testing.T) {
 	}
 	if code, _, _ := runCmd("test", "--config", dir, "nonsense", "x"); code != exitUsage {
 		t.Fatal("bad test target should be a usage error")
+	}
+}
+
+// --check reaches the email channel's own check (here nothing listens on the port) and says nothing
+// was sent; a channel that can only be tested by sending says so instead of sending.
+func TestTestChannelCheck(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "cfg")
+	if code, _, errOut := runCmd("init", "--config", dir, "--server-name", "box"); code != exitOK {
+		t.Fatalf("init: %s", errOut)
+	}
+	chans := "channels:\n  mail:\n    type: smtp\n    host: 127.0.0.1\n    port: 1\n    tls: none\n" +
+		"    from: pulse@example.com\n    to: [ops@example.com]\n  hook:\n    type: webhook\n    url: https://example.invalid/h\n"
+	if err := os.WriteFile(filepath.Join(dir, "channels.yaml"), []byte(chans), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, _ := runCmd("test", "--config", dir, "--json", "--check", "channel", "mail")
+	if code != exitInvalid || !strings.Contains(out, "checking mail failed: connect to 127.0.0.1:1") || !strings.Contains(out, `"sent": false`) {
+		t.Fatalf("smtp check: exit %d\n%s", code, out)
+	}
+	code, out, _ = runCmd("test", "--config", dir, "--json", "--check", "channel", "hook")
+	if code != exitInvalid || !strings.Contains(out, "cannot be checked without sending") || strings.Contains(out, "checking hook failed") {
+		t.Fatalf("webhook check: exit %d\n%s", code, out)
 	}
 }
