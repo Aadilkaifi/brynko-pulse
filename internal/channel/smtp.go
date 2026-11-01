@@ -51,6 +51,42 @@ func (s *smtpSender) tlsConf() *tls.Config {
 }
 
 func (s *smtpSender) Send(ctx context.Context, a alert.Alert) error {
+	c, err := s.envelope(ctx)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	w, err := c.Data()
+	if err != nil {
+		return err
+	}
+	if _, err := w.Write(s.message(a)); err != nil {
+		return err
+	}
+	if err := w.Close(); err != nil {
+		return err
+	}
+	return c.Quit()
+}
+
+// Check does everything Send does up to the message itself: connect, encrypt, log in, and have the
+// server accept the sender and every recipient. Then it resets and hangs up, so nobody receives
+// anything. A wrong host, port, password or sender shows here; an address the server accepts now
+// and bounces later does not, which only a real message can prove.
+func (s *smtpSender) Check(ctx context.Context) error {
+	c, err := s.envelope(ctx)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	if err := c.Reset(); err != nil {
+		return fmt.Errorf("reset: %w", err)
+	}
+	return c.Quit()
+}
+
+// envelope connects and runs the SMTP conversation up to the accepted recipients.
+func (s *smtpSender) envelope(ctx context.Context) (*smtp.Client, error) {
 	deadline, ok := ctx.Deadline()
 	if !ok {
 		deadline = time.Now().Add(30 * time.Second)
@@ -66,17 +102,23 @@ func (s *smtpSender) Send(ctx context.Context, a alert.Alert) error {
 		conn, err = dialer.DialContext(ctx, "tcp", addr)
 	}
 	if err != nil {
-		return fmt.Errorf("connect to %s: %w", addr, err)
+		return nil, fmt.Errorf("connect to %s: %w", addr, err)
 	}
 	_ = conn.SetDeadline(deadline)
 
 	c, err := smtp.NewClient(conn, s.host)
 	if err != nil {
 		conn.Close()
-		return fmt.Errorf("smtp greeting from %s: %w", addr, err)
+		return nil, fmt.Errorf("smtp greeting from %s: %w", addr, err)
 	}
-	defer c.Close()
+	if err := s.converse(c); err != nil {
+		c.Close()
+		return nil, err
+	}
+	return c, nil
+}
 
+func (s *smtpSender) converse(c *smtp.Client) error {
 	if s.mode == "starttls" {
 		if ok, _ := c.Extension("STARTTLS"); !ok {
 			return errors.New("the server does not offer STARTTLS; set tls: tls or tls: none")
@@ -99,17 +141,7 @@ func (s *smtpSender) Send(ctx context.Context, a alert.Alert) error {
 			return fmt.Errorf("recipient %s refused: %w", to, err)
 		}
 	}
-	w, err := c.Data()
-	if err != nil {
-		return err
-	}
-	if _, err := w.Write(s.message(a)); err != nil {
-		return err
-	}
-	if err := w.Close(); err != nil {
-		return err
-	}
-	return c.Quit()
+	return nil
 }
 
 func (s *smtpSender) message(a alert.Alert) []byte {

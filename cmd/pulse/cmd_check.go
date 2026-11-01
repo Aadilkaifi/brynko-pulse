@@ -27,8 +27,10 @@ import (
 
 var idRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
 
-const testDetails = `  pulse test channel <name>   sends a test alert through one channel
-  pulse test monitor <id>     runs one monitor once and shows what it measures`
+const testDetails = `  pulse test channel <name>           sends a test alert through one channel
+  pulse test channel <name> --check   checks an email channel without sending anything: connects,
+                                      logs in and has the server accept every recipient
+  pulse test monitor <id>             runs one monitor once and shows what it measures`
 
 func cmdTest(args []string, stdout, stderr io.Writer) int {
 	p := platformFor()
@@ -36,6 +38,7 @@ func cmdTest(args []string, stdout, stderr io.Writer) int {
 	cfgDir := fs.String("config", p.ConfigDir(), "configuration directory")
 	dataDir := fs.String("data", p.DataDir(), "where state and alert history are kept")
 	asJSON := fs.Bool("json", false, "print JSON")
+	check := fs.Bool("check", false, "channel: check it would deliver without sending anything (email only)")
 	if fs.Parse(reorderFlags(args)) != nil {
 		return exitUsage
 	}
@@ -48,7 +51,7 @@ func cmdTest(args []string, stdout, stderr io.Writer) int {
 		return fail(stdout, stderr, *asJSON, "test", err)
 	}
 	if fs.Arg(0) == "channel" {
-		return testChannel(cfg, fs.Arg(1), stdout, stderr, *asJSON)
+		return testChannel(cfg, fs.Arg(1), *check, stdout, stderr, *asJSON)
 	}
 	return testMonitor(cfg, fs.Arg(1), *dataDir, p, stdout, stderr, *asJSON)
 }
@@ -61,8 +64,11 @@ func fail(stdout, stderr io.Writer, asJSON bool, command string, err error) int 
 	return exitInvalid
 }
 
-func testChannel(cfg *config.Config, id string, stdout, stderr io.Writer, asJSON bool) int {
+func testChannel(cfg *config.Config, id string, check bool, stdout, stderr io.Writer, asJSON bool) int {
 	d := notify.New(cfg, channel.NewHTTPClient(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if check {
+		return checkChannel(d, id, stdout, stderr, asJSON)
+	}
 	a := alert.Alert{Server: cfg.ServerName, ServerAddress: cfg.ServerAddress, Monitor: "test", MonitorName: "test", MonitorType: "test",
 		Kind: alert.KindTest, Severity: "info", At: time.Now(),
 		Detail: fmt.Sprintf("This is a test alert from pulse on %s. If you can read it, the %s channel works.", cfg.ServerName, id)}
@@ -83,6 +89,29 @@ func testChannel(cfg *config.Config, id string, stdout, stderr io.Writer, asJSON
 		return exitInvalid
 	}
 	fmt.Fprintf(stdout, "Sent a test alert through %s. Check that it arrived.\n", id)
+	return exitOK
+}
+
+// checkChannel is `pulse test channel <name> --check`: everything short of sending.
+func checkChannel(d *notify.Dispatcher, id string, stdout, stderr io.Writer, asJSON bool) int {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	err := d.CheckNow(ctx, id)
+	if err != nil && !errors.Is(err, channel.ErrCannotCheck) {
+		err = fmt.Errorf("checking %s failed: %w", id, err)
+	}
+	if asJSON {
+		return finishJSON(stdout, stderr, struct {
+			envelope
+			Channel string `json:"channel"`
+			Sent    bool   `json:"sent"`
+		}{newEnvelope("test", err), id, false}, err)
+	}
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return exitInvalid
+	}
+	fmt.Fprintf(stdout, "Checked %s: the mail server accepted the login and every recipient. Nothing was sent.\n", id)
 	return exitOK
 }
 

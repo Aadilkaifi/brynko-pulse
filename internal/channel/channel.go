@@ -29,6 +29,15 @@ type Sender interface {
 	Send(ctx context.Context, a alert.Alert) error
 }
 
+// Checker is a channel that can confirm it would deliver without sending anything, so saving a
+// channel does not mail the people on it. Only email can today; other types say so.
+type Checker interface {
+	Check(ctx context.Context) error
+}
+
+// ErrCannotCheck is returned for a channel that can only be tested by sending.
+var ErrCannotCheck = errors.New("this channel type cannot be checked without sending; use pulse test channel without --check")
+
 // New builds the sender for one configured channel. Secrets are resolved here,
 // once, and never logged.
 func New(c config.Channel, secrets config.Secrets, client *http.Client) (Sender, error) {

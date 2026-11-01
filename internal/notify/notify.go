@@ -308,6 +308,22 @@ func (d *Dispatcher) SendNow(ctx context.Context, id string, a alert.Alert) erro
 	return t.sender.Send(ctx, a)
 }
 
+// CheckNow confirms one channel would deliver, without sending anything (pulse test channel --check).
+func (d *Dispatcher) CheckNow(ctx context.Context, id string) error {
+	t, ok := d.targets[id]
+	if !ok {
+		if st, known := d.status[id]; known && st.Unavailable != "" {
+			return fmt.Errorf("channel %s cannot be used: %s", id, st.Unavailable)
+		}
+		return fmt.Errorf("there is no channel named %s in channels.yaml", id)
+	}
+	c, ok := t.sender.(channel.Checker)
+	if !ok {
+		return channel.ErrCannotCheck
+	}
+	return c.Check(ctx)
+}
+
 // Status returns the delivery health of every channel.
 func (d *Dispatcher) Status() map[string]store.ChannelStatus {
 	d.mu.Lock()
