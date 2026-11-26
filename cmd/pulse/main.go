@@ -67,6 +67,8 @@ func init() {
 			usage: "status [flags]", run: cmdStatus},
 		{name: "history", section: "Run", summary: "Show recent alerts",
 			usage: "history [flags]", run: cmdHistory},
+		{name: "trends", section: "Run", summary: "Show how CPU, memory, load and disks changed, and when a disk will be full",
+			usage: "trends [--since 24h|7d|30d] [flags]", details: trendsDetails, run: cmdTrends},
 		{name: "silence", section: "Run", summary: "Pause alerts for a while, for example during a deploy",
 			usage:   "silence <monitor-id|all> <duration> [--reason text] | silence list | silence clear <monitor-id|all>",
 			details: silenceDetails, run: cmdSilence},

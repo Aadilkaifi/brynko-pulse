@@ -34,6 +34,7 @@ import (
 	"github.com/Aadilkaifi/brynko-pulse/internal/rule"
 	"github.com/Aadilkaifi/brynko-pulse/internal/silence"
 	"github.com/Aadilkaifi/brynko-pulse/internal/store"
+	"github.com/Aadilkaifi/brynko-pulse/internal/trends"
 	"github.com/Aadilkaifi/brynko-pulse/internal/watchdog"
 )
 
@@ -117,11 +118,19 @@ func Run(ctx context.Context, o Options) error {
 	go func() { defer close(fixDone); r.serveFixes(saveCtx) }()
 	watchDone := make(chan struct{})
 	go func() { defer close(watchDone); r.runWatchdog(saveCtx) }()
+	trendsDone := make(chan struct{})
+	if rec, err := trends.NewRecorder(filepath.Join(o.DataDir, trendsDir), o.Platform, r.trendDisks, o.Log); err != nil {
+		o.Log.Warn("trends are not recorded", "error", err.Error())
+		close(trendsDone)
+	} else {
+		go func() { defer close(trendsDone); rec.Run(saveCtx) }()
+	}
 	defer func() {
 		stopSaving()
 		<-saveDone
 		<-fixDone
 		<-watchDone
+		<-trendsDone
 		r.save()
 	}()
 
@@ -257,6 +266,30 @@ func (r *runner) start(parent context.Context, cfg *config.Config) *generation {
 	r.heals.Retain(ids)
 	r.current.Store(g)
 	return g
+}
+
+// trendsDir is where the readings over time are kept, inside the data folder.
+const trendsDir = "trends"
+
+// trendDisks are the disks recorded over time: the system disk and every disk a monitor watches.
+func (r *runner) trendDisks() []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(path string) {
+		if path != "" && !seen[path] {
+			seen[path] = true
+			out = append(out, path)
+		}
+	}
+	add(r.o.Platform.RootDisk())
+	if g := r.current.Load(); g != nil {
+		for _, m := range g.cfg.Monitors {
+			if m.Type == "disk" && m.IsEnabled() {
+				add(m.Path)
+			}
+		}
+	}
+	return out
 }
 
 func needsServiceEvents(cfg *config.Config) bool {

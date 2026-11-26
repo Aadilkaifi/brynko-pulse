@@ -73,7 +73,7 @@ The same app also works with your containers, databases, files and deploy script
 | [Channels](docs/channels.md) | Email, WhatsApp, Telegram, Slack, webhook |
 | [Self-healing](docs/self-healing.md) | Restart a failed service or container, or run your own fix |
 | [Dead-server alert](docs/dead-server-alert.md) | Get an email when a whole server goes silent |
-| [Operations](docs/operations.md) | Status, history, logs, troubleshooting |
+| [Operations](docs/operations.md) | Status, history, trends, logs, troubleshooting |
 | [Command reference](docs/cli.md) | Every command and flag |
 | [Configuration reference](docs/config-reference.md) | Every config field |
 | [Using pulse from an app](docs/ui.md) | The brynko devOps Agent desktop app: install, monitors, channels, settings |

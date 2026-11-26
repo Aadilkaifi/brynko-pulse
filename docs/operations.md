@@ -11,6 +11,23 @@ pulse history         # recent alerts, newest first (--limit 50 for more)
 running. Monitors turned off with `enabled: false` are listed last as `INACTIVE`. Both accept
 `--json`.
 
+## Trends
+
+```sh
+pulse trends                # the last 24 hours: CPU, memory, swap, load, and each disk
+pulse trends --since 7d     # a week, from 15-minute averages
+```
+
+While it runs, pulse records CPU, memory, swap, load (Linux) and disk use once a minute. It keeps
+every reading for a day, 15-minute averages for 14 days and hourly averages for 90 days, in the
+`trends` folder of the data folder; that is a few MB in all. The disks recorded are the system disk
+and every disk a `disk` monitor watches. The summary shows each value now, on average and at its
+highest, and how much each disk grew.
+
+When a disk has grown steadily for at least a day, `trends` says when it will be full at that rate,
+if that is within 90 days, for example: `/data fills up in about 5 days (around 2 Dec)`. Growth that
+is too uneven to project is not guessed at, and a trend starts again after space is freed.
+
 ## JSON output
 
 Every command that prints data accepts `--json`. The output is a contract that tools can rely on:
@@ -27,6 +44,10 @@ Every command that prints data accepts `--json`. The output is a contract that t
 - `status --json` has `watchdog` when the [dead-server alert](dead-server-alert.md) is on.
 - `history` lists alerts and, as kind `heal`, every fix [self-healing](self-healing.md) tried, approved
   or dismissed.
+- `trends --json` has `level` (`1m`, `15m` or `1h`: the detail shown), `since`, `points` (oldest first;
+  an average has `samples` above 1 and `cpu_max` / `mem_max`; a value the system does not give, such as
+  `load1` on Windows, is absent) and `forecasts` (`disk`, `full_at`, `days_left`, `growth_per_day` and
+  `free` in bytes, `confidence` from 0 to 1, `based_on_days`), soonest first.
   `channels` on an alert are the channels it was handed to. One a channel could not deliver after
   its retries has a second record of kind `undelivered`: `channels` names that channel, `detail` is
   its error, and `alert_kind` and `alert_at` are the kind and time of the alert it belongs to.
