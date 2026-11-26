@@ -152,15 +152,18 @@ type container struct {
 }
 
 func newContainer(name string, events *DockerEvents) Checker {
-	return &container{name: name, client: dockerClient(10 * time.Second), events: events}
+	return &container{name: name, client: DockerClient(10 * time.Second), events: events}
 }
 
-// dockerClient talks to the local Docker engine over its socket. A zero
+// DockerSocket is where the Docker engine listens on Linux.
+const DockerSocket = "/var/run/docker.sock"
+
+// DockerClient talks to the local Docker engine over its socket. A zero
 // timeout is for the event stream, which stays open.
-func dockerClient(timeout time.Duration) *http.Client {
+func DockerClient(timeout time.Duration) *http.Client {
 	tr := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		var d net.Dialer
-		return d.DialContext(ctx, "unix", "/var/run/docker.sock")
+		return d.DialContext(ctx, "unix", DockerSocket)
 	}}
 	return &http.Client{Transport: tr, Timeout: timeout}
 }
@@ -221,7 +224,7 @@ func RestartContainer(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	resp, err := dockerClient(60 * time.Second).Do(req)
+	resp, err := DockerClient(60 * time.Second).Do(req)
 	if err != nil {
 		return fmt.Errorf("cannot reach Docker (is the pulse user in the docker group?): %w", err)
 	}

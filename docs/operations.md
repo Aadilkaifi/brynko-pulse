@@ -28,6 +28,46 @@ When a disk has grown steadily for at least a day, `trends` says when it will be
 if that is within 90 days, for example: `/data fills up in about 5 days (around 2 Dec)`. Growth that
 is too uneven to project is not guessed at, and a trend starts again after space is freed.
 
+## Changes
+
+```sh
+pulse changes                     # what changed in the last 24 hours, newest first
+pulse changes --since 7d --kind sudo,file
+```
+
+While it runs, pulse keeps a timeline of what changed on the machine, so "what changed before this
+broke?" has an answer:
+
+| Kind | What is recorded | Read from |
+|---|---|---|
+| `sudo` | Each command run with sudo, who ran it, as whom and in which folder | systemd journal (Linux) |
+| `login` | Each SSH sign-in: who, from where, with a key or a password | systemd journal (Linux) |
+| `package` | Packages installed, upgraded or removed, and by whom; Windows software and updates | apt history (Debian, Ubuntu); Event Log (Windows) |
+| `service` | A service installed, or its start type changed | Event Log (Windows) |
+| `reboot` | The machine started; on Windows also who started a restart or shutdown | uptime; Event Log (Windows) |
+| `container` | A container created, removed, renamed, its settings changed, stopped, restarted or paused; an image pulled or deleted | Docker (Linux) |
+| `file` | A configuration file changed, appeared in a watched folder or was removed, with the lines that changed | fingerprints every 30 seconds |
+
+The configuration files watched are common ones (`/etc/hosts`, `/etc/fstab`, cron, sshd, sudoers,
+nginx, Apache, Docker, systemd units, MySQL, Redis, PostgreSQL; on Windows the hosts file and the IIS
+configuration) and the compose file of every container. Files the service cannot read are skipped.
+When someone ran a sudo command naming a file shortly before it changed, the change says who.
+
+Some things to know:
+
+- **Passwords and keys are hidden.** Values whose name says they are secret (`DB_PASSWORD=`,
+  `password:`, `--token`) are shown as `****` in commands and diffs. Files whose name says they hold
+  secrets (`.env`, `*.key`, `*.pem`) are fingerprinted only: the change is listed, the contents
+  never. pulse keeps a masked copy of each other watched file to show what changed.
+- **Repeats are listed once an hour.** The same change by the same person (a tool that signs in every
+  minute, the same command run again) is recorded once within an hour, so the timeline stays
+  readable. It is a timeline for finding causes, not a complete audit log.
+- **A first start looks back a day.** sudo commands, sign-ins and packages from the last 24 hours are
+  read when pulse first starts; after that each source continues where it stopped, so changes made
+  while pulse was stopped are still found. On Windows the Event Log is read from the moment pulse
+  starts.
+- Changes are kept for 90 days in the `changes` folder of the data folder, at most 20 MB.
+
 ## JSON output
 
 Every command that prints data accepts `--json`. The output is a contract that tools can rely on:
@@ -44,13 +84,16 @@ Every command that prints data accepts `--json`. The output is a contract that t
 - `status --json` has `watchdog` when the [dead-server alert](dead-server-alert.md) is on.
 - `history` lists alerts and, as kind `heal`, every fix [self-healing](self-healing.md) tried, approved
   or dismissed.
+  `channels` on an alert are the channels it was handed to. One a channel could not deliver after
+  its retries has a second record of kind `undelivered`: `channels` names that channel, `detail` is
+  its error, and `alert_kind` and `alert_at` are the kind and time of the alert it belongs to.
 - `trends --json` has `level` (`1m`, `15m` or `1h`: the detail shown), `since`, `points` (oldest first;
   an average has `samples` above 1 and `cpu_max` / `mem_max`; a value the system does not give, such as
   `load1` on Windows, is absent) and `forecasts` (`disk`, `full_at`, `days_left`, `growth_per_day` and
   `free` in bytes, `confidence` from 0 to 1, `based_on_days`), soonest first.
-  `channels` on an alert are the channels it was handed to. One a channel could not deliver after
-  its retries has a second record of kind `undelivered`: `channels` names that channel, `detail` is
-  its error, and `alert_kind` and `alert_at` are the kind and time of the alert it belongs to.
+- `changes --json` has `since` and `changes`, newest first. Each change has `at`, `kind` (`sudo`,
+  `login`, `package`, `service`, `reboot`, `container` or `file`), `what` (one line), `source` (`journal`,
+  `apt`, `eventlog`, `docker`, `file` or `boot`), and `who` and `detail` when known.
 
 ## The service
 

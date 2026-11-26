@@ -16,12 +16,14 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/Aadilkaifi/brynko-pulse/internal/alert"
+	"github.com/Aadilkaifi/brynko-pulse/internal/changes"
 	"github.com/Aadilkaifi/brynko-pulse/internal/channel"
 	"github.com/Aadilkaifi/brynko-pulse/internal/config"
 	"github.com/Aadilkaifi/brynko-pulse/internal/duration"
@@ -125,12 +127,20 @@ func Run(ctx context.Context, o Options) error {
 	} else {
 		go func() { defer close(trendsDone); rec.Run(saveCtx) }()
 	}
+	changesDone := make(chan struct{})
+	if rec, err := changes.NewRecorder(filepath.Join(o.DataDir, changesDir), r.changeOptions()); err != nil {
+		o.Log.Warn("changes are not recorded", "error", err.Error())
+		close(changesDone)
+	} else {
+		go func() { defer close(changesDone); rec.Run(saveCtx) }()
+	}
 	defer func() {
 		stopSaving()
 		<-saveDone
 		<-fixDone
 		<-watchDone
 		<-trendsDone
+		<-changesDone
 		r.save()
 	}()
 
@@ -270,6 +280,22 @@ func (r *runner) start(parent context.Context, cfg *config.Config) *generation {
 
 // trendsDir is where the readings over time are kept, inside the data folder.
 const trendsDir = "trends"
+
+// changesDir is where the change timeline is kept, inside the data folder.
+const changesDir = "changes"
+
+// changeOptions are the change timeline's sources: the system's own records, restarts, Docker on
+// Linux (container monitors read it the same way), and the platform's configuration files.
+func (r *runner) changeOptions() changes.Options {
+	o := changes.Options{Sources: r.o.Platform.ChangeSources(r.o.Log), Uptime: r.o.Platform.Uptime,
+		Files: r.o.Platform.ConfigFiles, Log: r.o.Log}
+	if runtime.GOOS == "linux" {
+		if _, err := os.Stat(monitor.DockerSocket); err == nil {
+			o.Docker = monitor.DockerClient(0) // each request sets its own deadline
+		}
+	}
+	return o
+}
 
 // trendDisks are the disks recorded over time: the system disk and every disk a monitor watches.
 func (r *runner) trendDisks() []string {

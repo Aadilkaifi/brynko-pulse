@@ -24,10 +24,9 @@ type InstallOptions struct {
 	// ContainerMonitors is how many container monitors are configured, so
 	// install can warn when they will lack access.
 	ContainerMonitors int
-	// JournalMonitors and LogFiles describe log monitors, so install can give
-	// read access to the journal and warn about files the service cannot read.
-	JournalMonitors int
-	LogFiles        []string
+	// LogFiles are the files log monitors read, so install can warn about the
+	// ones the service cannot read.
+	LogFiles []string
 }
 
 // InstallResult describes what Install set up.

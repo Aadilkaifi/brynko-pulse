@@ -6,7 +6,7 @@
 | [Configuration](configuration.md) | The config files, secrets, conditions, silences, maintenance windows |
 | [Monitors](monitors.md) | Every monitor type: what it measures and how to alert on it |
 | [Channels](channels.md) | Every alert channel: email, WhatsApp, Telegram, Slack, webhook |
-| [Operations](operations.md) | Day-to-day use: status, history, logs, reloading, troubleshooting |
+| [Operations](operations.md) | Day-to-day use: status, history, trends, the change timeline, logs, reloading, troubleshooting |
 | [Command reference](cli.md) | Every `pulse` command and flag (generated) |
 | [Configuration reference](config-reference.md) | Every config field (generated from the schema) |
 | [Using pulse from an app](ui.md) | Managing pulse from the brynko devOps Agent desktop app |

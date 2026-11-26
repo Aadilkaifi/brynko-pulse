@@ -19,6 +19,9 @@ WhatsApp (your own Meta account), Telegram, Slack or any webhook.
 - **Fast.** Service, container, file and log changes are noticed as they happen.
 - **Fixes what it can.** With [self-healing](docs/self-healing.md), pulse restarts a failed service
   or container, or runs your own fix, a limited number of times, and tells you what it did.
+- **Remembers.** [Trends](docs/operations.md#trends) of CPU, memory and disks for 90 days, with the
+  day a disk will be full, and a [timeline of changes](docs/operations.md#changes): sudo commands,
+  sign-ins, packages, containers and edits to configuration files.
 
 ## Install
 
@@ -73,7 +76,7 @@ The same app also works with your containers, databases, files and deploy script
 | [Channels](docs/channels.md) | Email, WhatsApp, Telegram, Slack, webhook |
 | [Self-healing](docs/self-healing.md) | Restart a failed service or container, or run your own fix |
 | [Dead-server alert](docs/dead-server-alert.md) | Get an email when a whole server goes silent |
-| [Operations](docs/operations.md) | Status, history, trends, logs, troubleshooting |
+| [Operations](docs/operations.md) | Status, history, trends, the change timeline, logs, troubleshooting |
 | [Command reference](docs/cli.md) | Every command and flag |
 | [Configuration reference](docs/config-reference.md) | Every config field |
 | [Using pulse from an app](docs/ui.md) | The brynko devOps Agent desktop app: install, monitors, channels, settings |

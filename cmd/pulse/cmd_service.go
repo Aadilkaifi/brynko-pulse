@@ -117,8 +117,6 @@ func install(p platform.Platform, cfgDir, dataDir string, allowDocker, discoverN
 		case !m.IsEnabled():
 		case m.Type == "container":
 			opts.ContainerMonitors++
-		case m.Type == "log" && m.Source != nil && m.Source.Journal != nil:
-			opts.JournalMonitors++
 		case m.Type == "log" && m.Source != nil && m.Source.File != "":
 			opts.LogFiles = append(opts.LogFiles, m.Source.File)
 		}

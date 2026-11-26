@@ -195,8 +195,9 @@ again is safe: it updates the program and the service in place.
   monitors work. pulse only reads container state and events, but membership of that group is
   equivalent to root. If you do not want that, install with `--no-docker`; running install again
   with or without the flag adds or removes the access.
-- **Journal:** log monitors that read the systemd journal need the `systemd-journal` group. Install
-  adds the service user to it when such a monitor exists, and removes it when none is left.
+- **Journal:** the service user joins the `systemd-journal` group, so pulse can read who ran what
+  with sudo and who signed in, for the [change timeline](operations.md#changes), and so journal log
+  monitors work. pulse only reads the journal.
 - Log files that the service user cannot read are listed as warnings by install.
 
 ## From source

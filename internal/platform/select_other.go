@@ -45,7 +45,9 @@ func (unsupported) ReloadService(context.Context) (bool, error)                {
 func (unsupported) RunAsService(host.ServiceFunc) (bool, error) {
 	return false, nil
 }
-func (unsupported) StartCommand() string { return "pulse run" }
+func (unsupported) StartCommand() string                           { return "pulse run" }
+func (unsupported) ChangeSources(*slog.Logger) []host.ChangeSource { return nil }
+func (unsupported) ConfigFiles() []string                          { return nil }
 func (unsupported) RestartService(context.Context, string) error {
 	return errOS
 }

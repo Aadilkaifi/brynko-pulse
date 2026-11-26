@@ -38,6 +38,12 @@ type Platform interface {
 	FollowEventLog(ctx context.Context, channel string, onLine func(string)) error
 	// NewServiceWatcher reports service state changes as they happen, until ctx ends.
 	NewServiceWatcher(ctx context.Context, log *slog.Logger) (host.ServiceWatcher, error)
+	// ChangeSources are the system's own records of changes (who ran what as root, who signed in,
+	// packages, services), for the change timeline.
+	ChangeSources(log *slog.Logger) []host.ChangeSource
+	// ConfigFiles are the configuration files the change timeline fingerprints by default. A pattern
+	// may hold * to take every matching file.
+	ConfigFiles() []string
 
 	// CheckConfigSecure returns an error when people other than administrators
 	// could change the configuration, since it can run commands.

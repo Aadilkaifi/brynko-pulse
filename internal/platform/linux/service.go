@@ -73,9 +73,11 @@ func (p Platform) Install(ctx context.Context, o host.InstallOptions) (host.Inst
 	} else if msg != "" {
 		step(msg)
 	}
-	if msg, err := setGroup(ctx, u, journalGroup, o.JournalMonitors > 0,
-		"Let "+serviceUser+" read the systemd journal, for journal log monitors (group "+journalGroup+")",
-		"Removed journal access from "+serviceUser+": no journal log monitors are left"); err != nil {
+	// The change timeline reads sudo commands and sign-ins from the journal, so the access is
+	// always given; journal log monitors use it too.
+	if msg, err := setGroup(ctx, u, journalGroup, true,
+		"Let "+serviceUser+" read the systemd journal, for the change timeline and journal log monitors (group "+journalGroup+")",
+		""); err != nil {
 		return res, err
 	} else if msg != "" {
 		step(msg)
