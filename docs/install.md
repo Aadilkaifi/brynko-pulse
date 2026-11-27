@@ -167,13 +167,18 @@ file that was changed after the build, or built anywhere else, fails the check.
 
 ### Install options
 
-`pulse install` takes two options:
+`pulse install` takes three options:
 
 - `--no-discover`: do not add monitors for the services, containers and ports found on the server
   (they are added switched off anyway). Works on a first install with the program-only and Windows
   methods, for example `sudo ./pulse_v0.1.2_linux_amd64 install --no-discover`.
 - `--no-docker`: do not give the service access to Docker (see below). After any install, run
   `sudo pulse install --no-docker` to take that access away again.
+- `--no-journal`: do not let the service read the system journal (see below). The change timeline
+  then has no sudo commands or sign-ins, and says so.
+
+Both access options apply to that run of install only: a package upgrade runs `pulse install`
+without them, so run it again with the option afterwards.
 
 ## What install sets up
 
@@ -197,7 +202,7 @@ again is safe: it updates the program and the service in place.
   with or without the flag adds or removes the access.
 - **Journal:** the service user joins the `systemd-journal` group, so pulse can read who ran what
   with sudo and who signed in, for the [change timeline](operations.md#changes), and so journal log
-  monitors work. pulse only reads the journal.
+  monitors work. pulse only reads the journal. Install with `--no-journal` to leave it out.
 - Log files that the service user cannot read are listed as warnings by install.
 
 ## From source

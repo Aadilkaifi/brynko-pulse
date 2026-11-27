@@ -73,11 +73,9 @@ func (p Platform) Install(ctx context.Context, o host.InstallOptions) (host.Inst
 	} else if msg != "" {
 		step(msg)
 	}
-	// The change timeline reads sudo commands and sign-ins from the journal, so the access is
-	// always given; journal log monitors use it too.
-	if msg, err := setGroup(ctx, u, journalGroup, true,
+	if msg, err := setGroup(ctx, u, journalGroup, o.AllowJournal,
 		"Let "+serviceUser+" read the systemd journal, for the change timeline and journal log monitors (group "+journalGroup+")",
-		""); err != nil {
+		"Removed journal access from "+serviceUser+": the change timeline will not show sudo commands or sign-ins"); err != nil {
 		return res, err
 	} else if msg != "" {
 		step(msg)
@@ -85,6 +83,9 @@ func (p Platform) Install(ctx context.Context, o host.InstallOptions) (host.Inst
 	for _, f := range unreadable(o.LogFiles, u) {
 		res.Warnings = append(res.Warnings, fmt.Sprintf("%s may not be readable by %s. Let it read the file, for example: sudo usermod -aG adm %s",
 			f, serviceUser, serviceUser))
+	}
+	if o.JournalMonitors > 0 && !o.AllowJournal {
+		res.Warnings = append(res.Warnings, fmt.Sprintf("%d journal log monitor(s) cannot read the journal because of --no-journal. Run pulse install without it to allow them.", o.JournalMonitors))
 	}
 	if o.ContainerMonitors > 0 && !o.AllowDocker {
 		res.Warnings = append(res.Warnings, fmt.Sprintf("%d container monitor(s) cannot reach Docker because of --no-docker. Run pulse install without it to allow them.", o.ContainerMonitors))

@@ -107,4 +107,10 @@ func TestReorderFlags(t *testing.T) {
 	if got != "--reason|x y|--json|--|web|1h|--raw" {
 		t.Fatalf("got %s", got)
 	}
+	// Switches take no value, so what follows them is not swallowed.
+	for _, flag := range []string{"--no-docker", "--no-journal", "--no-discover"} {
+		if got := strings.Join(reorderFlags([]string{flag, "extra"}), "|"); got != flag+"|extra" {
+			t.Errorf("%s: got %s", flag, got)
+		}
+	}
 }

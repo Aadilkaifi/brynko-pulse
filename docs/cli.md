@@ -253,6 +253,8 @@ Flags:
     	on a first install, do not add monitors for what discover finds
   -no-docker
     	do not let the service use Docker; container monitors will not work (Linux)
+  -no-journal
+    	do not let the service read the system journal; the change timeline will miss sudo commands and sign-ins (Linux)
 ```
 
 ### pulse uninstall

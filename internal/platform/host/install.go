@@ -21,12 +21,16 @@ type InstallOptions struct {
 	ConfigDir   string
 	DataDir     string
 	AllowDocker bool // give the service user access to Docker, where Docker is installed (Linux)
+	// AllowJournal lets the service user read the whole systemd journal (Linux), for the change
+	// timeline's sudo commands and sign-ins and for journal log monitors.
+	AllowJournal bool
 	// ContainerMonitors is how many container monitors are configured, so
 	// install can warn when they will lack access.
 	ContainerMonitors int
-	// LogFiles are the files log monitors read, so install can warn about the
-	// ones the service cannot read.
-	LogFiles []string
+	// JournalMonitors and LogFiles describe log monitors, so install can warn
+	// about the ones that will not be able to read their source.
+	JournalMonitors int
+	LogFiles        []string
 }
 
 // InstallResult describes what Install set up.

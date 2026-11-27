@@ -180,7 +180,7 @@ func reorderFlags(args []string) []string {
 // flags are the exception, so they are listed here.
 func takesValue(flag string) bool {
 	switch strings.TrimLeft(flag, "-") {
-	case "json", "dry-run", "yes", "purge", "no-docker", "no-discover", "apply", "h", "help":
+	case "json", "dry-run", "yes", "purge", "no-docker", "no-journal", "no-discover", "apply", "h", "help":
 		return false
 	}
 	return true

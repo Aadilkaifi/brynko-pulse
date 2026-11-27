@@ -40,6 +40,7 @@ func cmdInstall(args []string, stdout, stderr io.Writer) int {
 	cfgDir := fs.String("config", p.ConfigDir(), "configuration directory (created with a starter setup if missing)")
 	dataDir := fs.String("data", p.DataDir(), "where state and alert history are kept")
 	noDocker := fs.Bool("no-docker", false, "do not let the service use Docker; container monitors will not work (Linux)")
+	noJournal := fs.Bool("no-journal", false, "do not let the service read the system journal; the change timeline will miss sudo commands and sign-ins (Linux)")
 	noDiscover := fs.Bool("no-discover", false, "on a first install, do not add monitors for what discover finds")
 	asJSON := fs.Bool("json", false, "print JSON")
 	if fs.Parse(reorderFlags(args)) != nil {
@@ -50,7 +51,7 @@ func cmdInstall(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 
-	res, initRes, added, err := install(p, *cfgDir, *dataDir, !*noDocker, !*noDiscover)
+	res, initRes, added, err := install(p, *cfgDir, *dataDir, serviceAccess{Docker: !*noDocker, Journal: !*noJournal}, !*noDiscover)
 	if *asJSON {
 		return finishJSON(stdout, stderr, struct {
 			envelope
@@ -82,7 +83,13 @@ func cmdInstall(args []string, stdout, stderr io.Writer) int {
 
 // install checks everything it can before changing the system, so a bad
 // configuration never leaves a half-installed service behind.
-func install(p platform.Platform, cfgDir, dataDir string, allowDocker, discoverNew bool) (host.InstallResult, config.InitResult, []string, error) {
+// serviceAccess is what the service may read beyond its own files.
+type serviceAccess struct {
+	Docker  bool // the Docker engine, for container monitors and the change timeline
+	Journal bool // the whole system journal, for the change timeline and journal log monitors
+}
+
+func install(p platform.Platform, cfgDir, dataDir string, access serviceAccess, discoverNew bool) (host.InstallResult, config.InitResult, []string, error) {
 	var initRes config.InitResult
 	var added []string
 	cfgDir, dataDir, err := absDirs(cfgDir, dataDir)
@@ -111,12 +118,14 @@ func install(p platform.Platform, cfgDir, dataDir string, allowDocker, discoverN
 	if err != nil {
 		return host.InstallResult{}, initRes, added, err
 	}
-	opts := host.InstallOptions{ConfigDir: cfgDir, DataDir: dataDir, AllowDocker: allowDocker}
+	opts := host.InstallOptions{ConfigDir: cfgDir, DataDir: dataDir, AllowDocker: access.Docker, AllowJournal: access.Journal}
 	for _, m := range cfg.Monitors {
 		switch {
 		case !m.IsEnabled():
 		case m.Type == "container":
 			opts.ContainerMonitors++
+		case m.Type == "log" && m.Source != nil && m.Source.Journal != nil:
+			opts.JournalMonitors++
 		case m.Type == "log" && m.Source != nil && m.Source.File != "":
 			opts.LogFiles = append(opts.LogFiles, m.Source.File)
 		}
