@@ -228,6 +228,8 @@ Flags:
 - [`pulse run`](#pulse-run): Start monitoring in this terminal (runs until stopped)
 - [`pulse status`](#pulse-status): Show every monitor and channel right now
 - [`pulse history`](#pulse-history): Show recent alerts
+- [`pulse trends`](#pulse-trends): Show how CPU, memory, load and disks changed, and when a disk will be full
+- [`pulse changes`](#pulse-changes): Show what changed on the machine: sudo commands, sign-ins, packages, containers, config files
 - [`pulse silence`](#pulse-silence): Pause alerts for a while, for example during a deploy
 - [`pulse fix`](#pulse-fix): Approve or dismiss a fix that self-healing prepared
 - [`pulse ping`](#pulse-ping): Record a heartbeat, for jobs that check in
@@ -251,6 +253,8 @@ Flags:
     	on a first install, do not add monitors for what discover finds
   -no-docker
     	do not let the service use Docker; container monitors will not work (Linux)
+  -no-journal
+    	do not let the service read the system journal; the change timeline will miss sudo commands and sign-ins (Linux)
 ```
 
 ### pulse uninstall
@@ -319,6 +323,53 @@ Flags:
     	print JSON
   -limit int
     	how many alerts to show, newest first (default 20)
+```
+
+### pulse trends
+
+```text
+Show how CPU, memory, load and disks changed, and when a disk will be full.
+
+Usage:
+  pulse trends [--since 24h|7d|30d] [flags]
+
+pulse records CPU, memory, swap, load and disk use once a minute while it runs: every
+reading for a day, 15-minute averages for 14 days, hourly averages for 90 days. --since picks
+the span; the finest detail that covers it is shown. A disk that has grown steadily is given
+the date it will be full at that rate, when that is within 90 days.
+
+Flags:
+  -data string
+    	where state and alert history are kept (default "/var/lib/brynko-pulse")
+  -json
+    	print JSON
+  -since string
+    	how far back to look, for example 6h, 7d or 30d (at most 90d) (default "24h")
+```
+
+### pulse changes
+
+```text
+Show what changed on the machine: sudo commands, sign-ins, packages, containers, config files.
+
+Usage:
+  pulse changes [--since 24h|7d] [--kind sudo,file] [flags]
+
+While it runs, pulse keeps a timeline of what changed on the machine, newest first:
+commands run with sudo and sign-ins (from the journal), packages (apt), services, restarts and
+software (the Windows event log), containers and images (Docker), and edits to common
+configuration files, with the lines that changed. The same change within an hour is listed once.
+Changes are kept for 90 days. Passwords and keys are hidden.
+
+Flags:
+  -data string
+    	where state and alert history are kept (default "/var/lib/brynko-pulse")
+  -json
+    	print JSON
+  -kind string
+    	only these kinds, comma separated: sudo, login, package, service, reboot, container, file
+  -since string
+    	how far back to look, for example 6h, 7d or 30d (at most 90d) (default "24h")
 ```
 
 ### pulse silence

@@ -78,7 +78,7 @@ type DockerEvents struct {
 // NewDockerEvents prepares the stream; it connects when the first container
 // monitor watches, and keeps reconnecting until ctx ends.
 func NewDockerEvents(ctx context.Context, log *slog.Logger) *DockerEvents {
-	return &DockerEvents{log: log, client: dockerClient(0), subs: map[string][]func(){}, ctx: ctx}
+	return &DockerEvents{log: log, client: DockerClient(0), subs: map[string][]func(){}, ctx: ctx}
 }
 
 func (e *DockerEvents) watch(name string, changed func()) {
@@ -167,7 +167,7 @@ func ListContainers(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := dockerClient(10 * time.Second).Do(req)
+	resp, err := DockerClient(10 * time.Second).Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("cannot reach Docker (is this user in the docker group?): %w", err)
 	}
