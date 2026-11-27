@@ -68,12 +68,13 @@ func (p Platform) Install(ctx context.Context, o host.InstallOptions) (host.Inst
 	uid, _ := strconv.Atoi(u.Uid)
 	gid, _ := strconv.Atoi(u.Gid)
 
-	if msg, err := setDockerAccess(ctx, u, o.AllowDocker); err != nil {
+	rights := host.Rights{Docker: grant(u, created, dockerGroup, o.Docker), Journal: grant(u, created, journalGroup, o.Journal)}
+	if msg, err := setDockerAccess(ctx, u, rights.Docker); err != nil {
 		return res, err
 	} else if msg != "" {
 		step(msg)
 	}
-	if msg, err := setGroup(ctx, u, journalGroup, o.AllowJournal,
+	if msg, err := setGroup(ctx, u, journalGroup, rights.Journal,
 		"Let "+serviceUser+" read the systemd journal, for the change timeline and journal log monitors (group "+journalGroup+")",
 		"Removed journal access from "+serviceUser+": the change timeline will not show sudo commands or sign-ins"); err != nil {
 		return res, err
@@ -84,11 +85,12 @@ func (p Platform) Install(ctx context.Context, o host.InstallOptions) (host.Inst
 		res.Warnings = append(res.Warnings, fmt.Sprintf("%s may not be readable by %s. Let it read the file, for example: sudo usermod -aG adm %s",
 			f, serviceUser, serviceUser))
 	}
-	if o.JournalMonitors > 0 && !o.AllowJournal {
-		res.Warnings = append(res.Warnings, fmt.Sprintf("%d journal log monitor(s) cannot read the journal because of --no-journal. Run pulse install without it to allow them.", o.JournalMonitors))
+	res.Rights = &rights
+	if o.JournalMonitors > 0 && !rights.Journal {
+		res.Warnings = append(res.Warnings, fmt.Sprintf("%d journal log monitor(s) cannot read the journal: pulse has no journal access. Run sudo pulse install --journal to allow them.", o.JournalMonitors))
 	}
-	if o.ContainerMonitors > 0 && !o.AllowDocker {
-		res.Warnings = append(res.Warnings, fmt.Sprintf("%d container monitor(s) cannot reach Docker because of --no-docker. Run pulse install without it to allow them.", o.ContainerMonitors))
+	if o.ContainerMonitors > 0 && !rights.Docker {
+		res.Warnings = append(res.Warnings, fmt.Sprintf("%d container monitor(s) cannot reach Docker: pulse has no Docker access. Run sudo pulse install --docker to allow them.", o.ContainerMonitors))
 	}
 
 	if bin == packagedBinary {
@@ -278,6 +280,16 @@ func setDockerAccess(ctx context.Context, u *user.User, allow bool) (string, err
 	return setGroup(ctx, u, dockerGroup, allow,
 		"Gave "+serviceUser+" access to Docker (membership of the docker group is equivalent to root)",
 		"Removed Docker access from "+serviceUser)
+}
+
+// grant decides whether the service account ends up in group.
+func grant(u *user.User, created bool, group string, a host.Access) bool {
+	g, err := user.LookupGroup(group)
+	if err != nil {
+		return a.Grant(created, false, false)
+	}
+	groups, _ := u.GroupIds()
+	return a.Grant(created, true, slices.Contains(groups, g.Gid))
 }
 
 // setGroup makes membership of group match want. A group that does not exist

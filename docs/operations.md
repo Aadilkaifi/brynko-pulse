@@ -138,7 +138,7 @@ sudo usermod -aG brynko-pulse backupuser
 | `... holds secrets but other users can read or change it` | `sudo chmod 640 /etc/brynko-pulse/secrets.env` |
 | `X is not set. Add it to secrets.env` | Add `X=value` to `secrets.env`, then reload |
 | A channel shows `last delivery failed` | `sudo pulse test channel <name>` prints the provider's error |
-| `cannot reach Docker` | pulse was installed with `--no-docker`; run `sudo pulse install` again without it |
+| `cannot reach Docker` | pulse was installed with `--no-docker`; run `sudo pulse install --docker` |
 | A log monitor never matches | Check the service user can read the file; `sudo pulse install` warns about unreadable files |
 | `the service did not stay running` | `journalctl -u brynko-pulse -n 50` shows why |
 | `pulse is not allowed to restart this service` | Run `sudo pulse install` (Windows: `pulse install` as Administrator); it grants the right for the services in `restart_service` heal steps |

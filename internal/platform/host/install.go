@@ -15,15 +15,44 @@ const ServiceName = "brynko-pulse"
 // ErrNotAdmin means the action needs root or Administrator rights.
 var ErrNotAdmin = errors.New("this needs root or Administrator rights")
 
+// Access is what install does about one right the service account may get beyond its own files.
+type Access int
+
+const (
+	// AccessKeep keeps what an existing service account has. A new account gets the right.
+	AccessKeep Access = iota
+	AccessAllow
+	AccessDeny
+)
+
+// Grant decides whether the account ends up with the right. isNew means install has just created
+// the account. A right whose group does not exist yet (Docker not installed) counts as wanted, so
+// it is given once the group appears.
+func (a Access) Grant(isNew, groupExists, member bool) bool {
+	switch a {
+	case AccessAllow:
+		return true
+	case AccessDeny:
+		return false
+	}
+	return isNew || !groupExists || member
+}
+
+// Rights is what the service account was left with, so the next install can keep it.
+type Rights struct {
+	Docker  bool `json:"docker"`
+	Journal bool `json:"journal"`
+}
+
 // InstallOptions controls Install.
 type InstallOptions struct {
-	Source      string // the running binary, copied into place
-	ConfigDir   string
-	DataDir     string
-	AllowDocker bool // give the service user access to Docker, where Docker is installed (Linux)
-	// AllowJournal lets the service user read the whole systemd journal (Linux), for the change
-	// timeline's sudo commands and sign-ins and for journal log monitors.
-	AllowJournal bool
+	Source    string // the running binary, copied into place
+	ConfigDir string
+	DataDir   string
+	Docker    Access // access to Docker, where Docker is installed (Linux)
+	// Journal is read access to the whole systemd journal (Linux), for the change timeline's sudo
+	// commands and sign-ins and for journal log monitors.
+	Journal Access
 	// ContainerMonitors is how many container monitors are configured, so
 	// install can warn when they will lack access.
 	ContainerMonitors int
@@ -41,6 +70,8 @@ type InstallResult struct {
 	Steps    []string `json:"steps"`
 	Warnings []string `json:"warnings"`
 	Next     []string `json:"next"` // what the user can do now, in plain words
+	// Rights is what the service account was given; nil where the platform has no such rights.
+	Rights *Rights `json:"rights,omitempty"`
 }
 
 // HealRights describes what SetHealRights changed, in plain words.
