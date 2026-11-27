@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -51,12 +52,18 @@ func (r *Recorder) ScanFiles(now time.Time) {
 	}
 	seeded := len(r.st.Files) > 0
 	present := map[string]bool{}
+	var blocked []string // compose files the service cannot read
 	for _, p := range paths {
 		fi, err := os.Stat(p)
-		if err != nil || !fi.Mode().IsRegular() {
+		if err == nil && fi.Mode().IsRegular() {
+			present[p] = true
+		}
+		if errors.Is(err, fs.ErrPermission) && r.compose[p] {
+			blocked = append(blocked, p)
+		}
+		if !present[p] {
 			continue
 		}
-		present[p] = true
 		st := fileStat{mod: fi.ModTime(), size: fi.Size()}
 		old, known := r.st.Files[p]
 		if known && r.stats[p] == st {
@@ -64,7 +71,12 @@ func (r *Recorder) ScanFiles(now time.Time) {
 		}
 		sum, content, err := fingerprint(p, fi.Size())
 		if err != nil {
-			continue // unreadable by the service account: skipped, not an error
+			// The common files are skipped quietly when the service may not read them (some are
+			// readable only by their own service on many systems); a compose file is reported.
+			if errors.Is(err, fs.ErrPermission) && r.compose[p] {
+				blocked = append(blocked, p)
+			}
+			continue
 		}
 		r.stats[p] = st
 		if known && old == sum {
@@ -84,10 +96,12 @@ func (r *Recorder) ScanFiles(now time.Time) {
 		if present[p] {
 			continue
 		}
-		if _, err := os.Stat(p); errors.Is(err, fs.ErrNotExist) {
+		_, err := os.Stat(p)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
 			r.emit(r.fileChange(now, p, "removed", "", nil))
-		} else if err == nil && watched[p] {
-			continue // still there and still watched, only unreadable for now
+		case watched[p]:
+			continue // still watched, only unreadable for now: keep what is known of it
 		}
 		// Removed, or no longer watched (a compose project that is gone): forget it.
 		delete(r.st.Files, p)
@@ -95,10 +109,50 @@ func (r *Recorder) ScanFiles(now time.Time) {
 		_ = os.Remove(r.copyPath(p))
 		r.dirty = true
 	}
+	if len(blocked) == 0 {
+		r.clearProblemLocked(fileSource)
+	} else {
+		r.setProblemLocked(fileSource, blockedProblem(blocked))
+	}
+}
+
+// fileSource names the file fingerprints among the sources, in changes and in problems.
+const fileSource = "file"
+
+// blockedProblem says which compose files cannot be read and which folder stops the service.
+func blockedProblem(paths []string) string {
+	sort.Strings(paths)
+	msg := fmt.Sprintf("%d compose file(s) cannot be read by the service, so their changes are not recorded: %s",
+		len(paths), paths[0])
+	if len(paths) > 1 {
+		msg += fmt.Sprintf(" and %d more", len(paths)-1)
+	}
+	if dir := closedFolder(paths[0]); dir != "" {
+		msg += fmt.Sprintf(". The service cannot enter %s; to let it pass through without listing it: sudo setfacl -m u:%s:x %s",
+			dir, host.ServiceName, dir)
+	}
+	return msg
+}
+
+// closedFolder is the deepest folder above path that the service can see but not enter, if any.
+func closedFolder(path string) string {
+	var chain []string
+	for d := filepath.Dir(path); ; d = filepath.Dir(d) {
+		chain = append(chain, d)
+		if filepath.Dir(d) == d {
+			break
+		}
+	}
+	for i := len(chain) - 1; i > 0; i-- {
+		if _, err := os.Stat(chain[i-1]); errors.Is(err, fs.ErrPermission) {
+			return chain[i]
+		}
+	}
+	return ""
 }
 
 func (r *Recorder) fileChange(now time.Time, path, verb, before string, after []byte) host.Change {
-	c := host.Change{At: now, Kind: host.ChangeFile, What: path + " " + verb, Source: "file"}
+	c := host.Change{At: now, Kind: host.ChangeFile, What: path + " " + verb, Source: fileSource}
 	var detail []string
 	if s, ok := r.likelyCause(now, path); ok {
 		c.Who = s.Who

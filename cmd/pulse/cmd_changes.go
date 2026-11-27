@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -48,10 +49,12 @@ func cmdChanges(args []string, stdout, stderr io.Writer) int {
 		kinds, err = parseKinds(*kindText)
 	}
 	from := time.Now().Add(-since)
+	dir := filepath.Join(*dataDir, "changes")
 	var list []host.Change
 	if err == nil {
-		list, err = changes.Read(filepath.Join(*dataDir, "changes"), from)
+		list, err = changes.Read(dir, from)
 	}
+	problems := changes.Problems(dir)
 	if len(kinds) > 0 {
 		list = slices.DeleteFunc(list, func(c host.Change) bool { return !slices.Contains(kinds, c.Kind) })
 	}
@@ -61,9 +64,10 @@ func cmdChanges(args []string, stdout, stderr io.Writer) int {
 		}
 		return finishJSON(stdout, stderr, struct {
 			envelope
-			Since   time.Time     `json:"since"`
-			Changes []host.Change `json:"changes"`
-		}{newEnvelope("changes", err), from.UTC().Truncate(time.Second), list}, err)
+			Since    time.Time         `json:"since"`
+			Changes  []host.Change     `json:"changes"`
+			Problems map[string]string `json:"problems"`
+		}{newEnvelope("changes", err), from.UTC().Truncate(time.Second), list, problems}, err)
 	}
 	if err != nil {
 		fmt.Fprintln(stderr, err)
@@ -71,10 +75,23 @@ func cmdChanges(args []string, stdout, stderr io.Writer) int {
 	}
 	if len(list) == 0 {
 		fmt.Fprintf(stdout, "No changes in the last %s.\n", *sinceText)
-		return exitOK
+	} else {
+		printChanges(stdout, list, *sinceText)
 	}
-	printChanges(stdout, list, *sinceText)
+	printProblems(stdout, problems)
 	return exitOK
+}
+
+// printProblems says what is not being recorded, so a quiet timeline is not mistaken for a quiet machine.
+func printProblems(w io.Writer, problems map[string]string) {
+	if len(problems) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "\nNot recorded right now:")
+	names := slices.Sorted(maps.Keys(problems))
+	for _, name := range names {
+		fmt.Fprintf(w, "  %s: %s\n", name, problems[name])
+	}
 }
 
 func parseKinds(text string) ([]string, error) {

@@ -48,10 +48,22 @@ broke?" has an answer:
 | `container` | A container created, removed, renamed, its settings changed, stopped, restarted or paused; an image pulled or deleted | Docker (Linux) |
 | `file` | A configuration file changed, appeared in a watched folder or was removed, with the lines that changed | fingerprints every 30 seconds |
 
-The configuration files watched are common ones (`/etc/hosts`, `/etc/fstab`, cron, sshd, sudoers,
-nginx, Apache, Docker, systemd units, MySQL, Redis, PostgreSQL; on Windows the hosts file and the IIS
-configuration) and the compose file of every container. Files the service cannot read are skipped.
-When someone ran a sudo command naming a file shortly before it changed, the change says who.
+The configuration files watched are common ones (`/etc/hosts`, `/etc/fstab`, cron, sshd, nginx,
+Apache, Docker, systemd units, MySQL, Redis, PostgreSQL; on Windows the hosts file and the IIS
+configuration) and the compose file of every container. When someone ran a sudo command naming a
+file shortly before it changed, the change says who.
+
+A common file the service may not read (some are readable only by their own service) is skipped.
+A compose file it cannot read is reported, because it is usually the one you care about: often it
+sits in a home folder the service cannot enter. `pulse changes` then names the folder and the
+command that lets the service pass through it without listing it, for example:
+
+```sh
+sudo setfacl -m u:brynko-pulse:x /home/ubuntu
+```
+
+Below the timeline, `pulse changes` lists anything it cannot record right now and why: no access to
+the journal (run `sudo pulse install` again), Docker not reachable, or compose files it cannot read.
 
 Some things to know:
 
@@ -91,9 +103,10 @@ Every command that prints data accepts `--json`. The output is a contract that t
   an average has `samples` above 1 and `cpu_max` / `mem_max`; a value the system does not give, such as
   `load1` on Windows, is absent) and `forecasts` (`disk`, `full_at`, `days_left`, `growth_per_day` and
   `free` in bytes, `confidence` from 0 to 1, `based_on_days`), soonest first.
-- `changes --json` has `since` and `changes`, newest first. Each change has `at`, `kind` (`sudo`,
+- `changes --json` has `since`, `changes` (newest first) and `problems`. Each change has `at`, `kind` (`sudo`,
   `login`, `package`, `service`, `reboot`, `container` or `file`), `what` (one line), `source` (`journal`,
-  `apt`, `eventlog`, `docker`, `file` or `boot`), and `who` and `detail` when known.
+  `apt`, `eventlog`, `docker`, `file` or `boot`), and `who` and `detail` when known. `problems` maps
+  each source that records nothing right now to the reason (empty when all work).
 
 ## The service
 

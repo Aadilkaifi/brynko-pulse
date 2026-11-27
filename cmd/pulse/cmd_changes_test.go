@@ -94,8 +94,27 @@ func TestChangesBeforeAnyRecorded(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, out)
 	}
 	code, out, _ = runCmd("changes", "--json", "--data", t.TempDir())
-	if code != exitOK || !strings.Contains(out, `"changes": []`) {
-		t.Fatalf("an empty list, never null: %s", out)
+	if code != exitOK || !strings.Contains(out, `"changes": []`) || !strings.Contains(out, `"problems": {}`) {
+		t.Fatalf("empty, never null: %s", out)
+	}
+}
+
+func TestChangesSaysWhatIsNotRecorded(t *testing.T) {
+	data := t.TempDir()
+	dir := filepath.Join(data, "changes")
+	_ = os.MkdirAll(dir, 0o750)
+	state := `{"problems":{"journal":"the service cannot read the system journal","docker":"cannot reach Docker"}}`
+	if err := os.WriteFile(filepath.Join(dir, "state.json"), []byte(state), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	code, out, _ := runCmd("changes", "--data", data)
+	if code != exitOK || !strings.Contains(out, "No changes") || !strings.Contains(out, "Not recorded right now:") ||
+		strings.Index(out, "  docker: cannot reach Docker") > strings.Index(out, "  journal: the service cannot") {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	code, out, _ = runCmd("changes", "--json", "--data", data)
+	if code != exitOK || !strings.Contains(out, `"journal": "the service cannot read the system journal"`) {
+		t.Fatalf("%s", out)
 	}
 }
 

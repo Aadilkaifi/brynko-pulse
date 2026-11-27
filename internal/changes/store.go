@@ -127,12 +127,13 @@ type state struct {
 	Cursors map[string]string `json:"cursors"` // each source's position
 	Boot    time.Time         `json:"boot"`    // when the machine last started
 	Files   map[string]string `json:"files"`   // each watched file's SHA-256
+	// Problems says, by source, why it records nothing right now (no access, Docker not reachable).
+	Problems map[string]string `json:"problems"`
 }
 
 func loadState(dir string) state {
-	st := state{Cursors: map[string]string{}, Files: map[string]string{}}
-	b, err := os.ReadFile(filepath.Join(dir, stateFile))
-	if err == nil {
+	var st state
+	if b, err := os.ReadFile(filepath.Join(dir, stateFile)); err == nil {
 		_ = json.Unmarshal(b, &st)
 	}
 	if st.Cursors == nil {
@@ -141,7 +142,16 @@ func loadState(dir string) state {
 	if st.Files == nil {
 		st.Files = map[string]string{}
 	}
+	if st.Problems == nil {
+		st.Problems = map[string]string{}
+	}
 	return st
+}
+
+// Problems are the sources that record nothing right now, with the reason, as of the recorder's
+// last save. Nothing recorded yet means no problems known.
+func Problems(dir string) map[string]string {
+	return loadState(dir).Problems
 }
 
 func saveState(dir string, st state) error {

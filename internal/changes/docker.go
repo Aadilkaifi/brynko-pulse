@@ -53,11 +53,13 @@ func (r *Recorder) pollDocker(ctx context.Context, now time.Time) {
 	q.Set("filters", `{"type":["container","image"]}`)
 	events, err := dockerGet[dockerEvent](ctx, r.o.Docker, "/events?"+q.Encode(), true)
 	if err != nil {
+		r.setProblem(dockerCursor, err)
 		r.warnOnce("docker", "changes: Docker events not read", err)
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.clearProblemLocked(dockerCursor)
 	for _, e := range events {
 		if f := e.Actor.Attributes[composeLabel]; f != "" {
 			r.addComposeFiles(f)
@@ -79,6 +81,7 @@ func (r *Recorder) learnComposeFiles(ctx context.Context) {
 	list, err := dockerGet[[]summary](ctx, r.o.Docker, "/containers/json?all=1", false)
 	if err != nil || len(list) == 0 {
 		if err != nil {
+			r.setProblem(dockerCursor, err)
 			r.warnOnce("docker", "changes: Docker containers not read", err)
 		}
 		return

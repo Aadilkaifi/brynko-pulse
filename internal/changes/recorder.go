@@ -127,6 +127,7 @@ func (r *Recorder) follow(ctx context.Context, s host.ChangeSource) {
 			r.o.Log.Info("changes: source not available on this system", "source", s.Name(), "reason", err.Error())
 			return
 		}
+		r.setProblem(s.Name(), err)
 		r.warnOnce(s.Name(), "changes: source stopped; trying again in a minute", err)
 		select {
 		case <-ctx.Done():
@@ -160,14 +161,38 @@ func (r *Recorder) emit(c host.Change) bool {
 		r.warnOnce("store", "changes: not recorded", err)
 		return false
 	}
+	r.clearProblemLocked(c.Source) // a source that records works
 	return true
 }
 
 func (r *Recorder) checkpoint(source, cursor string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.clearProblemLocked(source)
 	if r.st.Cursors[source] != cursor {
 		r.st.Cursors[source] = cursor
+		r.dirty = true
+	}
+}
+
+// setProblem notes why a source records nothing, so `pulse changes` can say so instead of showing
+// a timeline that only looks quiet. It is cleared when the source works again.
+func (r *Recorder) setProblem(source string, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.setProblemLocked(source, err.Error())
+}
+
+func (r *Recorder) setProblemLocked(source, problem string) {
+	if r.st.Problems[source] != problem {
+		r.st.Problems[source] = problem
+		r.dirty = true
+	}
+}
+
+func (r *Recorder) clearProblemLocked(source string) {
+	if _, ok := r.st.Problems[source]; ok {
+		delete(r.st.Problems, source)
 		r.dirty = true
 	}
 }

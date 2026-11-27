@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"os/user"
 	"strconv"
 	"strings"
 	"syscall"
@@ -36,7 +37,7 @@ func (Platform) ChangeSources(log *slog.Logger) []host.ChangeSource {
 func (Platform) ConfigFiles() []string {
 	return []string{
 		"/etc/hosts", "/etc/fstab", "/etc/crontab", "/etc/cron.d/*",
-		"/etc/ssh/sshd_config", "/etc/ssh/sshd_config.d/*", "/etc/sudoers", "/etc/sudoers.d/*",
+		"/etc/ssh/sshd_config", "/etc/ssh/sshd_config.d/*",
 		"/etc/nginx/nginx.conf", "/etc/nginx/conf.d/*.conf", "/etc/nginx/sites-enabled/*",
 		"/etc/apache2/apache2.conf", "/etc/apache2/sites-enabled/*",
 		"/etc/docker/daemon.json", "/etc/systemd/system/*.service",
@@ -56,6 +57,10 @@ func (journalChanges) Name() string { return "journal" }
 func (j journalChanges) Follow(ctx context.Context, cursor string, emit func(host.Change), checkpoint func(string)) error {
 	if _, err := exec.LookPath("journalctl"); err != nil {
 		return errors.New("journalctl was not found, so sudo commands and sign-ins are not recorded")
+	}
+	if !canReadSystemJournal() {
+		// journalctl would only show this account's own entries, and the timeline would look quiet.
+		return errors.New("the service cannot read the system journal, so sudo commands and sign-ins are not recorded. Give it access with: sudo pulse install")
 	}
 	backoff := time.Second
 	for ctx.Err() == nil {
@@ -86,6 +91,32 @@ func (j journalChanges) Follow(ctx context.Context, cursor string, emit func(hos
 		backoff = min(backoff*2, 30*time.Second)
 	}
 	return nil
+}
+
+// journalReaders are the groups systemd lets read every journal entry.
+var journalReaders = []string{journalGroup, "adm", "wheel"}
+
+// canReadSystemJournal is true for root and for members of a group that may read the whole journal.
+func canReadSystemJournal() bool {
+	if os.Geteuid() == 0 {
+		return true
+	}
+	gids, err := os.Getgroups()
+	if err != nil {
+		return true // cannot tell: let journalctl try
+	}
+	for _, name := range journalReaders {
+		g, err := user.LookupGroup(name)
+		if err != nil {
+			continue
+		}
+		for _, gid := range gids {
+			if strconv.Itoa(gid) == g.Gid {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func runChangeJournal(ctx context.Context, cursor string, on func(host.Change, string)) (int, error) {
