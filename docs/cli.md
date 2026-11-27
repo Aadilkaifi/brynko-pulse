@@ -247,14 +247,18 @@ Flags:
     	configuration directory (created with a starter setup if missing) (default "/etc/brynko-pulse")
   -data string
     	where state and alert history are kept (default "/var/lib/brynko-pulse")
+  -docker
+    	let the service use Docker again after --no-docker (Linux)
+  -journal
+    	let the service read the system journal again after --no-journal (Linux)
   -json
     	print JSON
   -no-discover
     	on a first install, do not add monitors for what discover finds
   -no-docker
-    	do not let the service use Docker; container monitors will not work (Linux)
+    	do not let the service use Docker; container monitors will not work. Kept by later installs and upgrades (Linux)
   -no-journal
-    	do not let the service read the system journal; the change timeline will miss sudo commands and sign-ins (Linux)
+    	do not let the service read the system journal; the change timeline will miss sudo commands and sign-ins. Kept by later installs and upgrades (Linux)
 ```
 
 ### pulse uninstall

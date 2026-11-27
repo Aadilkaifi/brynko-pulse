@@ -25,6 +25,7 @@ type fakeService struct {
 	reloaded    bool
 	reloads     int
 	healRights  [][]string // every list SetHealRights was given
+	rights      bool       // Install reports the rights it gave, as on Linux, to a new account
 }
 
 func (f *fakeService) SetHealRights(_ context.Context, services []string) (host.HealRights, error) {
@@ -39,7 +40,11 @@ func (f *fakeService) ReloadService(context.Context) (bool, error) {
 
 func (f *fakeService) Install(_ context.Context, o host.InstallOptions) (host.InstallResult, error) {
 	f.installed = &o
-	return host.InstallResult{Service: host.ServiceName, Steps: []string{"did it"}, Next: []string{"pulse status"}}, f.err
+	res := host.InstallResult{Service: host.ServiceName, Steps: []string{"did it"}, Next: []string{"pulse status"}}
+	if f.rights {
+		res.Rights = &host.Rights{Docker: o.Docker.Grant(true, true, false), Journal: o.Journal.Grant(true, true, false)}
+	}
+	return res, f.err
 }
 
 func (f *fakeService) Uninstall(_ context.Context, o host.UninstallOptions) (host.UninstallResult, error) {
@@ -102,6 +107,87 @@ func TestInstallCreatesConfigFirst(t *testing.T) {
 	}
 	if f.installed == nil || f.installed.ConfigDir != cfg || f.installed.DataDir != data || f.installed.Source == "" {
 		t.Fatalf("install options: %+v", f.installed)
+	}
+}
+
+// An upgrade runs install without options: it must not give back a right taken away.
+func TestInstallKeepsTheRightsChosenBefore(t *testing.T) {
+	f := useFake(t, nil)
+	f.rights = true
+	cfg, data := filepath.Join(t.TempDir(), "cfg"), t.TempDir()
+	install := func(args ...string) host.InstallOptions {
+		t.Helper()
+		args = append([]string{"install", "--config", cfg, "--data", data, "--no-discover"}, args...)
+		if code, out, errOut := runCmd(args...); code != exitOK {
+			t.Fatalf("%v: exit %d: %s %s", args, code, out, errOut)
+		}
+		return *f.installed
+	}
+	recorded := func() host.Rights {
+		t.Helper()
+		b, err := os.ReadFile(filepath.Join(cfg, rightsFile))
+		var r host.Rights
+		if err != nil || json.Unmarshal(b, &r) != nil {
+			t.Fatalf("no record: %v %s", err, b)
+		}
+		return r
+	}
+
+	if o := install(); o.Docker != host.AccessKeep || o.Journal != host.AccessKeep {
+		t.Fatalf("first install with no record: %+v", o)
+	}
+	if r := recorded(); !r.Docker || !r.Journal {
+		t.Fatalf("a new account gets both rights: %+v", r)
+	}
+	install("--no-docker")
+	if r := recorded(); r.Docker || !r.Journal {
+		t.Fatalf("after --no-docker: %+v", r)
+	}
+	if o := install(); o.Docker != host.AccessDeny || o.Journal != host.AccessAllow {
+		t.Fatalf("a plain install (an upgrade) must keep the choice: %+v", o)
+	}
+	install("--no-journal")
+	if o := install(); o.Docker != host.AccessDeny || o.Journal != host.AccessDeny {
+		t.Fatalf("both taken away: %+v", o)
+	}
+	if o := install("--docker"); o.Docker != host.AccessAllow || o.Journal != host.AccessDeny {
+		t.Fatalf("--docker gives Docker back only: %+v", o)
+	}
+	if r := recorded(); !r.Docker || r.Journal {
+		t.Fatalf("after --docker: %+v", r)
+	}
+
+	// A broken record is ignored: the platform keeps what the account has.
+	if err := os.WriteFile(filepath.Join(cfg, rightsFile), []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if o := install(); o.Docker != host.AccessKeep || o.Journal != host.AccessKeep {
+		t.Fatalf("with a broken record: %+v", o)
+	}
+}
+
+func TestInstallRefusesBothWaysAtOnce(t *testing.T) {
+	f := useFake(t, nil)
+	for _, pair := range [][]string{{"--docker", "--no-docker"}, {"--journal", "--no-journal"}} {
+		args := append([]string{"install", "--config", filepath.Join(t.TempDir(), "cfg"), "--data", t.TempDir()}, pair...)
+		if code, _, _ := runCmd(args...); code != exitUsage {
+			t.Errorf("%v: exit %d, want usage", pair, code)
+		}
+	}
+	if f.installed != nil {
+		t.Fatal("nothing may be installed")
+	}
+}
+
+// A platform without these rights (Windows) leaves no record.
+func TestInstallRecordsNothingWithoutRights(t *testing.T) {
+	useFake(t, nil)
+	cfg := filepath.Join(t.TempDir(), "cfg")
+	if code, out, errOut := runCmd("install", "--config", cfg, "--data", t.TempDir(), "--no-discover"); code != exitOK {
+		t.Fatalf("exit %d: %s %s", code, out, errOut)
+	}
+	if _, err := os.Stat(filepath.Join(cfg, rightsFile)); !os.IsNotExist(err) {
+		t.Fatalf("record written: %v", err)
 	}
 }
 

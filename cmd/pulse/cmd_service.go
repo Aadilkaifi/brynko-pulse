@@ -6,6 +6,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/Aadilkaifi/brynko-pulse/internal/channel"
 	"github.com/Aadilkaifi/brynko-pulse/internal/config"
+	"github.com/Aadilkaifi/brynko-pulse/internal/fsutil"
 	"github.com/Aadilkaifi/brynko-pulse/internal/platform"
 	"github.com/Aadilkaifi/brynko-pulse/internal/platform/host"
 	"github.com/Aadilkaifi/brynko-pulse/internal/runner"
@@ -39,19 +41,22 @@ func cmdInstall(args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("install", stderr)
 	cfgDir := fs.String("config", p.ConfigDir(), "configuration directory (created with a starter setup if missing)")
 	dataDir := fs.String("data", p.DataDir(), "where state and alert history are kept")
-	noDocker := fs.Bool("no-docker", false, "do not let the service use Docker; container monitors will not work (Linux)")
-	noJournal := fs.Bool("no-journal", false, "do not let the service read the system journal; the change timeline will miss sudo commands and sign-ins (Linux)")
+	docker := fs.Bool("docker", false, "let the service use Docker again after --no-docker (Linux)")
+	noDocker := fs.Bool("no-docker", false, "do not let the service use Docker; container monitors will not work. Kept by later installs and upgrades (Linux)")
+	journal := fs.Bool("journal", false, "let the service read the system journal again after --no-journal (Linux)")
+	noJournal := fs.Bool("no-journal", false, "do not let the service read the system journal; the change timeline will miss sudo commands and sign-ins. Kept by later installs and upgrades (Linux)")
 	noDiscover := fs.Bool("no-discover", false, "on a first install, do not add monitors for what discover finds")
 	asJSON := fs.Bool("json", false, "print JSON")
 	if fs.Parse(reorderFlags(args)) != nil {
 		return exitUsage
 	}
-	if fs.NArg() != 0 {
+	if fs.NArg() != 0 || *docker && *noDocker || *journal && *noJournal {
 		fs.Usage()
 		return exitUsage
 	}
 
-	res, initRes, added, err := install(p, *cfgDir, *dataDir, serviceAccess{Docker: !*noDocker, Journal: !*noJournal}, !*noDiscover)
+	access := serviceAccess{Docker: accessFlag(*docker, *noDocker), Journal: accessFlag(*journal, *noJournal)}
+	res, initRes, added, err := install(p, *cfgDir, *dataDir, access, !*noDiscover)
 	if *asJSON {
 		return finishJSON(stdout, stderr, struct {
 			envelope
@@ -85,8 +90,54 @@ func cmdInstall(args []string, stdout, stderr io.Writer) int {
 // configuration never leaves a half-installed service behind.
 // serviceAccess is what the service may read beyond its own files.
 type serviceAccess struct {
-	Docker  bool // the Docker engine, for container monitors and the change timeline
-	Journal bool // the whole system journal, for the change timeline and journal log monitors
+	Docker  host.Access // the Docker engine, for container monitors and the change timeline
+	Journal host.Access // the whole system journal, for the change timeline and journal log monitors
+}
+
+// rightsFile, in the configuration directory, records the rights the last install left the service
+// with, so an upgrade (which runs install without options) does not give back a right taken away.
+// The service can read that directory but not write it, so it cannot grant itself a right.
+const rightsFile = "install.json"
+
+func accessFlag(allow, deny bool) host.Access {
+	switch {
+	case allow:
+		return host.AccessAllow
+	case deny:
+		return host.AccessDeny
+	}
+	return host.AccessKeep
+}
+
+// withRecorded fills what the options left open from the last install's record. Without a record,
+// the platform keeps what the service account already has.
+func (a serviceAccess) withRecorded(cfgDir string) serviceAccess {
+	b, err := os.ReadFile(filepath.Join(cfgDir, rightsFile))
+	if err != nil {
+		return a
+	}
+	var r host.Rights
+	if json.Unmarshal(b, &r) != nil {
+		return a
+	}
+	pick := func(cur host.Access, had bool) host.Access {
+		if cur != host.AccessKeep {
+			return cur
+		}
+		return accessFlag(had, !had)
+	}
+	return serviceAccess{Docker: pick(a.Docker, r.Docker), Journal: pick(a.Journal, r.Journal)}
+}
+
+func recordRights(cfgDir string, r host.Rights) error {
+	b, err := json.MarshalIndent(r, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := fsutil.WriteAtomic(filepath.Join(cfgDir, rightsFile), append(b, '\n'), 0o644); err != nil {
+		return fmt.Errorf("record the service's rights: %w", err)
+	}
+	return nil
 }
 
 func install(p platform.Platform, cfgDir, dataDir string, access serviceAccess, discoverNew bool) (host.InstallResult, config.InitResult, []string, error) {
@@ -118,7 +169,8 @@ func install(p platform.Platform, cfgDir, dataDir string, access serviceAccess, 
 	if err != nil {
 		return host.InstallResult{}, initRes, added, err
 	}
-	opts := host.InstallOptions{ConfigDir: cfgDir, DataDir: dataDir, AllowDocker: access.Docker, AllowJournal: access.Journal}
+	access = access.withRecorded(cfgDir)
+	opts := host.InstallOptions{ConfigDir: cfgDir, DataDir: dataDir, Docker: access.Docker, Journal: access.Journal}
 	for _, m := range cfg.Monitors {
 		switch {
 		case !m.IsEnabled():
@@ -142,6 +194,12 @@ func install(p platform.Platform, cfgDir, dataDir string, access serviceAccess, 
 	defer cancel()
 	opts.Source = src
 	res, err := p.Install(ctx, opts)
+	if err == nil && res.Rights != nil {
+		// Without the record the next install keeps what the account has, which is still safe.
+		if rerr := recordRights(cfgDir, *res.Rights); rerr != nil {
+			res.Warnings = append(res.Warnings, rerr.Error())
+		}
+	}
 	if err == nil {
 		hr := setHealRights(ctx, p, cfg)
 		res.Steps = append(res.Steps, hr.Steps...)
